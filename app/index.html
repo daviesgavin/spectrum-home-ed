@@ -197,7 +197,8 @@ const age = y => y ? (new Date().getFullYear() - y) : null;
 function mondayOf(dt){ const d = new Date(dt); const day = d.getDay(); const diff = day === 0 ? 1 : (day === 1 ? 0 : 8 - day); d.setDate(d.getDate() + diff); return d; }
 const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const nice = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d).toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" }); };
-function coverage(content){ const areas = content.areas || []; const n = Object.fromEntries(areas.map(a => [a, 0])); (content.days||[]).forEach(d => (d.lessons||[]).forEach(l => (l.areas||[]).forEach(a => { if (a in n) n[a]++; }))); return n; }
+function coverage(content){ const areas = content.areas || []; const n = Object.fromEntries(areas.map(a => [a, 0])); (content.days||[]).forEach(d => (d.lessons||[]).forEach(l => { const as = (l.areas||[]).filter(a => a in n); as.forEach(a => n[a] += (l.minutes || 0) / as.length); })); return n; }
+const hm = m => { m = Math.round(m); const h = Math.floor(m / 60), r = m % 60; return h ? `${h}h${r ? ` ${r}m` : ""}` : `${r}m`; };
 const banner = () => LIVE ? "" : `<p class="banner noprint"><b>Demo mode.</b> Everything is saved on this device only, and plans come from a built-in template. Accounts and the AI planner switch on once the app is connected.</p>`;
 async function guard(fn){ try { await fn(); } catch(e){ console.error(e); view.innerHTML = `<div class="card stack"><h2>Something went wrong</h2><p>${esc(e.message)}</p><p><a class="btn" href="#/">Back to your family</a></p></div>`; } }
 
@@ -255,7 +256,7 @@ async function homeView(){
 }
 
 async function childFormView(id){
-  const c = id ? await db.child(id) : { name:"", birth_year:"", state:"WA", support_level:"high", communication:"", interests:[], sensory_notes:"", goals:"", minutes_per_day:60 };
+  const c = id ? await db.child(id) : { name:"", birth_year:"", state:"WA", support_level:"high", communication:"", interests:[], sensory_notes:"", goals:"", minutes_per_day:180, time_mode:"recommended", time_reason:"" };
   let interests = [...(c.interests || [])];
   view.innerHTML = `<form class="stack" id="cForm" novalidate>${banner()}
     <h1>${id ? `Edit ${esc(c.name)}'s profile` : "Add a child"}</h1>
@@ -277,7 +278,17 @@ async function childFormView(id){
         <div class="row"><input type="text" id="cInt" maxlength="60" style="flex:1;min-width:0" placeholder="e.g. game shows"><button class="btn quiet small" type="button" id="intAdd">Add</button></div></div>
       <label class="f">Sensory notes <small>What helps them feel calm, and what overwhelms them</small><textarea id="cSens" maxlength="500">${esc(c.sensory_notes || "")}</textarea></label>
       <label class="f">Your goals <small>What matters most right now, including therapy goals</small><textarea id="cGoals" maxlength="500">${esc(c.goals || "")}</textarea></label>
-      <label class="f">Structured learning time per day: <span id="minOut">${c.minutes_per_day}</span> minutes <input type="range" id="cMin" min="15" max="240" step="15" value="${c.minutes_per_day}"></label>
+    </div>
+    <div class="card stack"><h3>Learning time</h3>
+      <p class="muted small" id="recText"></p>
+      <div class="levels">
+        <label class="level"><input type="radio" name="tmode" value="recommended" ${c.time_mode !== "adjusted" ? "checked" : ""}><span><b>Recommended</b><span>Plans meet the suggested hours for each learning area. For high-support learners, hands-on learning like cooking, outings and swimming counts.</span></span></label>
+        <label class="level"><input type="radio" name="tmode" value="adjusted" ${c.time_mode === "adjusted" ? "checked" : ""}><span><b>Adjusted for my child</b><span>Shorter days on medical or therapy advice. Record the reason; moderators accept reasonable adjustments.</span></span></label>
+      </div>
+      <div id="adjBox" class="grid2" ${c.time_mode === "adjusted" ? "" : "hidden"}>
+        <label class="f">Hours per day <select id="cMin">${[30,60,90,120,150,180,210,240].map(m => `<option value="${m}" ${+c.minutes_per_day === m ? "selected" : ""}>${m/60} hour${m === 60 ? "" : "s"}</option>`).join("")}</select></label>
+        <label class="f">Reason <small>e.g. OT advice, fatigue, medical</small><input type="text" id="cReason" maxlength="200" value="${esc(c.time_reason || "")}"></label>
+      </div>
     </div>
     <p id="cMsg" role="alert" style="color:var(--bad)"></p>
     <div class="row"><button class="btn primary" type="submit">${id ? "Save changes" : "Save profile"}</button><a class="btn quiet" href="${id ? `#/child/${id}` : "#/"}">Cancel</a></div>
@@ -289,14 +300,20 @@ async function childFormView(id){
   $("intChips").onclick = e => { if (e.target.dataset.i) { interests.splice(+e.target.dataset.i, 1); drawChips(); } };
   $("intAdd").onclick = addInt;
   $("cInt").onkeydown = e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addInt(); } };
-  $("cMin").oninput = e => $("minOut").textContent = e.target.value;
+  const hrs = m => { const h = Math.round(m / 6) / 10; return `${h} hour${h === 1 ? "" : "s"}`; };
+  const drawRec = () => { const y = parseInt($("cYear").value, 10); const fw = FW[$("cState").value] || FW.WA; const r = window.SHE_recommendedTime(isNaN(y) ? null : new Date().getFullYear() - y, fw.areas);
+    $("recText").textContent = `Recommended for ${r.stage.toLowerCase()} age: about ${hrs(r.perDay)} a day (${Math.round(r.weeklyMinutes/60)} hours a week), split across the learning areas. No state sets a legal minimum, but this matches published guidance and shows a moderator the curriculum is covered.`; };
+  drawRec(); $("cYear").oninput = drawRec; $("cState").onchange = drawRec;
+  document.querySelectorAll("input[name=tmode]").forEach(r => r.onchange = () => $("adjBox").hidden = r.value !== "adjusted" || !r.checked);
   if (id) $("cDel").onclick = () => { $("delArea").innerHTML = `<div class="confirm">Delete ${esc(c.name)} and all their plans? This can't be undone.<button class="btn danger small" type="button" id="dy">Delete</button><button class="btn quiet small" type="button" id="dn">Keep</button></div>`; $("dn").onclick = () => childFormView(id); $("dy").onclick = async () => { await db.deleteChild(id); toast("Profile deleted"); location.hash = "#/"; }; };
   $("cForm").onsubmit = async e => {
     e.preventDefault(); addInt();
     const name = $("cName").value.trim(); if (!name) { $("cMsg").textContent = "Add a first name or nickname."; return; }
     const y = parseInt($("cYear").value, 10);
     const rec = { name, birth_year: isNaN(y) ? null : y, state: $("cState").value, support_level: document.querySelector("input[name=lvl]:checked")?.value || "high",
-      communication: $("cComm").value.trim(), interests, sensory_notes: $("cSens").value.trim(), goals: $("cGoals").value.trim(), minutes_per_day: +$("cMin").value };
+      communication: $("cComm").value.trim(), interests, sensory_notes: $("cSens").value.trim(), goals: $("cGoals").value.trim(),
+      time_mode: document.querySelector("input[name=tmode]:checked")?.value || "recommended", time_reason: $("cReason").value.trim() || null };
+    rec.minutes_per_day = rec.time_mode === "adjusted" ? +$("cMin").value : window.SHE_dailyMinutes(rec);
     if (id) rec.id = id;
     try { const saved = await db.saveChild(rec); toast("Profile saved"); location.hash = `#/child/${saved.id}`; } catch(err){ $("cMsg").textContent = err.message; }
   };
@@ -317,7 +334,7 @@ async function childView(id){
         <label class="f">Focus this week <small>Optional</small><input type="text" id="gFocus" maxlength="200" placeholder="e.g. asking for help, counting to 10"></label>
       </div>
       <label class="f">Anything else? <small>Optional: appointments, outings, what's working</small><textarea id="gExtra" maxlength="500"></textarea></label>
-      <div class="row"><button class="btn primary" type="submit" id="gGo">Create ${esc(c.name)}'s plan</button><span id="gWait" hidden><span class="spinner"></span> Writing ${esc(c.name)}'s week. This takes about 30–60 seconds.</span></div>
+      <div class="row"><button class="btn primary" type="submit" id="gGo">Create ${esc(c.name)}'s plan</button><span id="gWait" hidden><span class="spinner"></span> Writing ${esc(c.name)}'s week. This takes about a minute.</span></div>
       <p id="gMsg" role="alert" style="color:var(--bad)"></p>
     </form>
     <div class="stack"><h2>Plans</h2>
@@ -361,8 +378,10 @@ async function planView(id, dayIdx = 0){
     ${ct.summary ? `<p>${esc(ct.summary)}</p>` : ""}
     <div class="card stack"><div class="row" style="justify-content:space-between"><h3>This week's progress</h3><span class="small muted">${done} of ${total} lessons recorded</span></div><div class="progress"><i style="width:${total ? Math.round(done/total*100) : 0}%"></i></div></div>
     ${ct.focus_goals?.length ? `<div class="card stack"><h3>Focus goals</h3><ul style="margin:0;padding-left:20px">${ct.focus_goals.map(g => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
-    <div class="card stack"><h3>Learning areas covered</h3><div class="cover">${Object.entries(cov).map(([a,n]) => `<div class="area ${n ? "ok" : "miss"}"><span>${esc(a)}</span><b>${n || "none"}</b></div>`).join("")}</div>
-      ${Object.values(cov).some(n => !n) ? `<p class="small" style="color:var(--bad)">Add a lesson for any area marked "none" so the week covers every learning area.</p>` : `<p class="small" style="color:var(--good)">Every learning area is covered this week.</p>`}</div>
+    ${(() => { const tg = ct.targets || null; const tot = Object.values(cov).reduce((a,b) => a + b, 0); const short = Object.entries(cov).filter(([a,n]) => !n || (tg && tg[a] && n < tg[a] * 0.75));
+      return `<div class="card stack"><div class="row" style="justify-content:space-between"><h3>Learning time by area</h3><span class="small muted">${hm(tot)} this week${tg ? ` · recommended ${hm(Object.values(tg).reduce((a,b)=>a+b,0))}` : ""}</span></div>
+      <div class="cover">${Object.entries(cov).map(([a,n]) => { const t = tg?.[a]; const ok = n && (!t || n >= t * 0.75); return `<div class="area ${ok ? "ok" : "miss"}"><span>${esc(a)}</span><b>${n ? hm(n) : "none"}${t ? `<span class="muted" style="font-weight:400"> / ${hm(t)}</span>` : ""}</b></div>`; }).join("")}</div>
+      ${short.length ? `<p class="small" style="color:var(--bad)">Below the recommended time: ${short.map(([a]) => esc(a)).join(", ")}. Add or lengthen a lesson in ${short.length > 1 ? "these areas" : "this area"}.</p>` : `<p class="small" style="color:var(--good)">Every learning area ${tg ? "meets its recommended time" : "is covered"} this week.</p>`}</div>`; })()}
     <div class="daytabs noprint" role="tablist">${ct.days.map((d,i) => `<button type="button" role="tab" data-day="${i}" aria-pressed="${i === dayIdx}">${esc(d.day)}</button>`).join("")}</div>
     ${ct.days.map((d,i) => `<section class="day stack" data-d="${i}" ${i === dayIdx ? "" : "hidden"}><h2>${esc(d.day)}</h2>${d.regulation ? `<p class="banner">Regulation: ${esc(d.regulation)}</p>` : ""}${d.lessons.map((l,k) => lessonHTML(l,i,k)).join("")}<div class="noprint"><button class="btn quiet" type="button" data-add="${i}">Add your own lesson</button></div></section>`).join("")}
     <div class="row noprint"><button class="btn" type="button" id="pPrint">Print this plan</button><span id="pDelArea"><button class="btn danger" type="button" id="pDel">Delete plan</button></span></div>
@@ -385,7 +404,7 @@ function editLesson(article, ct, d, k, planId, dayIdx){
   article.innerHTML = `<form class="stack" novalidate>
     <label class="f">Title <input type="text" name="title" value="${esc(l.title)}" maxlength="120"></label>
     <div class="stack" style="gap:6px"><b>Learning areas</b><div class="chips">${areas.map(a => `<label class="chip" style="cursor:pointer"><input type="checkbox" name="areas" value="${esc(a)}" ${(l.areas||[]).includes(a) ? "checked" : ""}> ${esc(a)}</label>`).join("")}</div></div>
-    <div class="grid2"><label class="f">Minutes <input type="number" name="minutes" min="3" max="60" value="${l.minutes}"></label><label class="f">Goal <input type="text" name="goal" value="${esc(l.goal)}" maxlength="300"></label></div>
+    <div class="grid2"><label class="f">Minutes <input type="number" name="minutes" min="3" max="120" value="${l.minutes}"></label><label class="f">Goal <input type="text" name="goal" value="${esc(l.goal)}" maxlength="300"></label></div>
     <label class="f">Hook <input type="text" name="hook" value="${esc(l.hook)}" maxlength="300"></label>
     <label class="f">You'll need <input type="text" name="materials" value="${esc(l.materials)}" maxlength="300"></label>
     <label class="f">Steps <small>One per line</small><textarea name="steps" rows="5">${esc((l.steps||[]).join("\n"))}</textarea></label>
@@ -396,7 +415,7 @@ function editLesson(article, ct, d, k, planId, dayIdx){
   const f = article.querySelector("form");
   f.querySelector("[data-cancel]").onclick = () => planView(planId, dayIdx);
   f.onsubmit = async e => { e.preventDefault(); const fd = new FormData(f);
-    ct.days[d].lessons[k] = { title: fd.get("title").trim() || "Lesson", areas: fd.getAll("areas"), minutes: Math.max(3, Math.min(60, +fd.get("minutes") || 10)), goal: fd.get("goal").trim(), hook: fd.get("hook").trim(), materials: fd.get("materials").trim(), steps: fd.get("steps").split("\n").map(s => s.trim()).filter(Boolean), communication: fd.get("communication").trim(), adjustments: fd.get("adjustments").trim(), evidence: fd.get("evidence").trim() };
+    ct.days[d].lessons[k] = { title: fd.get("title").trim() || "Lesson", areas: fd.getAll("areas"), minutes: Math.max(3, Math.min(120, +fd.get("minutes") || 10)), goal: fd.get("goal").trim(), hook: fd.get("hook").trim(), materials: fd.get("materials").trim(), steps: fd.get("steps").split("\n").map(s => s.trim()).filter(Boolean), communication: fd.get("communication").trim(), adjustments: fd.get("adjustments").trim(), evidence: fd.get("evidence").trim() };
     await db.savePlanContent(planId, ct); toast("Lesson saved"); planView(planId, dayIdx); };
 }
 

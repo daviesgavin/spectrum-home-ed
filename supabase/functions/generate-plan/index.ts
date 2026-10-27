@@ -28,6 +28,21 @@ const SUPPORT: Record<string, string> = {
   advanced: "Advanced learner on the spectrum: may be working at or above year level in some areas, needs interest-led depth and social/emotional support. Lessons 20-40 minutes.",
 };
 
+// Recommended weekly learning time (keep in sync with app/planner-data.js). NSW guidance suggests about 15 hours a week for primary.
+const GROUP: Record<string, string> = { "English": "eng", "Mathematics": "math", "Languages": "lang" };
+function recommended(age: number | null, areas: string[]) {
+  let stage: string, weekly: number;
+  if (age != null && age <= 5) { stage = "Early years"; weekly = 600; }
+  else if (age == null || age <= 12) { stage = "Primary"; weekly = 900; }
+  else if (age <= 17) { stage = "Secondary"; weekly = 1200; }
+  else { stage = "Adult life skills"; weekly = 900; }
+  const w: Record<string, number> = {}; let rest = 1; const others: string[] = [];
+  for (const a of areas) { const g = GROUP[a]; if (g === "eng") { w[a] = .3; rest -= .3; } else if (g === "math") { w[a] = .2; rest -= .2; } else if (g === "lang") { w[a] = .03; rest -= .03; } else others.push(a); }
+  for (const a of others) w[a] = rest / others.length;
+  const targets = Object.fromEntries(areas.map((a) => [a, Math.round(weekly * w[a] / 5) * 5]));
+  return { stage, weekly, perDay: Math.round(weekly / 5), targets };
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
@@ -54,10 +69,10 @@ function clean(plan: any, areas: string[]) {
     days: days.map((d: any) => ({
       day: asStr(d?.day, 20),
       regulation: asStr(d?.regulation, 300),
-      lessons: (Array.isArray(d?.lessons) ? d.lessons : []).slice(0, 6).map((l: any) => ({
+      lessons: (Array.isArray(d?.lessons) ? d.lessons : []).slice(0, 12).map((l: any) => ({
         title: asStr(l?.title, 120),
         areas: (Array.isArray(l?.areas) ? l.areas : []).filter((a: unknown) => typeof a === "string" && areas.includes(a)).slice(0, 3),
-        minutes: Math.max(3, Math.min(60, Number(l?.minutes) || 10)),
+        minutes: Math.max(3, Math.min(120, Number(l?.minutes) || 10)),
         goal: asStr(l?.goal, 300),
         hook: asStr(l?.hook, 300),
         materials: asStr(l?.materials, 300),
@@ -113,7 +128,10 @@ Deno.serve(async (req) => {
 
   const fw = FRAMEWORKS[child.state] ?? FRAMEWORKS.WA;
   const age = ageFrom(child.birth_year);
-  const minutes = Number(child.minutes_per_day) || 60;
+  const rec = recommended(age, fw.areas);
+  const adjusted = child.time_mode === "adjusted" && Number(child.minutes_per_day) > 0;
+  const minutes = adjusted ? Number(child.minutes_per_day) : rec.perDay;
+  const targets = adjusted ? null : rec.targets;
 
   const system = `You write home education lesson plans for Australian parents of autistic, nonverbal and other special-needs children.
 Principles: interest-led (use the child's favourite things as the hook in nearly every lesson), regulation before learning, communication in every lesson (respect AAC, signs, gestalt scripts as real language), short realistic sessions, real life counts as learning (shops, cooking, outings), success is participation.
@@ -129,13 +147,16 @@ Return ONLY valid JSON, no markdown.`;
 - Interests: ${(child.interests || []).join(", ") || "not stated"}
 - Sensory notes: ${child.sensory_notes || "none"}
 - Parent's goals: ${child.goals || "none"}
-- Structured learning time per day: about ${minutes} minutes
+- Learning time: about ${minutes} minutes a day${adjusted ? ` (reduced by the parent: ${child.time_reason || "no reason given"})` : ` (recommended for ${rec.stage.toLowerCase()} age)`}
 ${focus ? `- Focus this week: ${String(focus).slice(0, 300)}` : ""}
 ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}
 
 Write a Monday to Friday plan for the week starting ${week_start}.
-- Fit each day's lessons into about ${minutes} minutes in total.
-- Across the week, cover every one of these learning areas at least once, using these exact names: ${fw.areas.join("; ")}.
+- Each day's lessons should add up to about ${minutes} minutes.
+- Mix two kinds of lesson: short focused lessons sized to the child's attention span, and longer hands-on learning (cooking, shopping trips, swimming, gardening, music, art, life skills) that counts toward the day's time. For high support learners most of the time will be hands-on.
+- Use these exact learning area names: ${fw.areas.join("; ")}. Every area must appear during the week.
+${targets ? `- Weekly minutes to aim for in each area (a lesson's minutes are shared equally between the areas it lists): ${Object.entries(targets).map(([a, m]) => `${a} ${m}`).join("; ")}.` : "- Share the time sensibly across the areas, with the most time on English and Mathematics."}
+- Keep every text field short: steps of one sentence, 3-5 steps per lesson.
 - Each lesson lists 1 to 3 of those learning areas.
 - Pitch goals at the child's real level, not their age.
 
@@ -150,7 +171,7 @@ JSON shape:
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model: Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5",
-      max_tokens: 12000,
+      max_tokens: 16000,
       system,
       messages: [{ role: "user", content: user_prompt }],
     }),
@@ -170,7 +191,7 @@ JSON shape:
   await admin.from("generations").insert({ parent_id: user.id });
 
   const { data: saved, error: saveErr } = await userClient.from("plans").insert({
-    child_id, week_start, title: plan.title, content: { ...plan, framework: fw.name, areas: fw.areas }, source: "ai",
+    child_id, week_start, title: plan.title, content: { ...plan, framework: fw.name, areas: fw.areas, targets, daily_minutes: minutes }, source: "ai",
   }).select().single();
   if (saveErr) return json({ error: "Couldn't save the plan: " + saveErr.message }, 500);
 
