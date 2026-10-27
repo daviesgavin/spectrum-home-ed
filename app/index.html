@@ -85,6 +85,30 @@ textarea{min-height:72px;resize:vertical}
 .hpi{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ev{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
 .reqcard{text-decoration:none;color:inherit}
+.teach{background:var(--bg);border-left:4px solid var(--accent);border-radius:10px;padding:10px 12px}
+.teach p{margin:4px 0 0}
+.sheet{background:#fff;color:#111;border:1px solid var(--line);border-radius:16px;padding:22px;font-size:19px;line-height:1.5}
+.sheet h1{font-size:28px}.sheet h2{font-size:21px;margin-top:18px}
+.sheet .teach{background:#eef6f8;color:#111}
+.sheet .muted{color:#555}
+.sheethead{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:16px;margin-bottom:10px}
+.witems{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:18px}
+.witem{break-inside:avoid}
+.wq{margin:0 0 8px}
+.wblank{display:inline-block;min-width:90px;border-bottom:2px solid #333;height:1.1em;vertical-align:bottom}
+.wblank.wide{min-width:180px}
+.wopts{display:flex;gap:14px;flex-wrap:wrap}
+.wopt{border:2px solid #333;border-radius:999px;padding:6px 16px;min-width:56px;text-align:center}
+.wvis{font-size:34px;letter-spacing:4px;line-height:1.3;margin:4px 0 8px;word-break:break-all}
+.wlines span{display:block;border-bottom:1.5px solid #999;height:34px}
+.wdraw{border:2px dashed #999;border-radius:12px;height:170px}
+.wmatch{display:grid;grid-template-columns:1fr 1fr;gap:40px}
+.wmatch div{display:flex;flex-direction:column;gap:14px}
+.wmatch div:first-child{text-align:right}
+.wbox{margin-top:6px}
+.wdone{text-align:center;font-size:22px;margin-top:20px}
+.anskey{font-size:16px}
+@media print{.sheet{border:0;padding:0;font-size:18px}.anskey{break-before:page}body{background:#fff}}
 .big{font-family:var(--display);font-size:28px;font-weight:800;font-variant-numeric:tabular-nums}
 .evgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
 .evgrid figure{margin:0;display:flex;flex-direction:column;gap:4px}
@@ -232,7 +256,7 @@ if (LIVE) {
         const { data: j } = await sb.from("plan_jobs").select("status,progress,plan_id,program_id,error").eq("id", jobId).maybeSingle();
         if (!j) continue;
         if (typeof onProgress === "function") onProgress(j.progress || 0);
-        if (j.status === "done" && (j.plan_id || j.program_id || j.year_plan_id || j.report_id)) return j;
+        if (j.status === "done" && (j.plan_id || j.program_id || j.year_plan_id || j.report_id || j.worksheet_id)) return j;
         if (j.status === "failed") throw new Error(j.error || "The writer had a problem. Please try again.");
       }
       throw new Error("This is taking longer than usual. Check back in a few minutes; it will appear when it's ready.");
@@ -267,6 +291,14 @@ if (LIVE) {
       if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
       return this.waitJob(r.data.job_id);
     },
+    async writeWorksheet(child, ws){
+      const r = await sb.functions.invoke("generate-plan", { body:{ kind: "worksheet", child_id: child.id, ws } });
+      if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
+      const j = await this.waitJob(r.data.job_id); return { id: j.worksheet_id };
+    },
+    async worksheets(childId){ return must(await sb.from("worksheets").select("id,subject,level,topic,created_at,content->>title").eq("child_id", childId).order("created_at", { ascending:false }).limit(100)); },
+    async worksheet(id){ return must(await sb.from("worksheets").select("*").eq("id", id).single()); },
+    async deleteWorksheet(id){ must(await sb.from("worksheets").delete().eq("id", id)); },
     async programs(childId){ return must(await sb.from("programs").select("id,title,state,created_at,updated_at").eq("child_id", childId).order("created_at", { ascending:false })); },
     async program(id){ return must(await sb.from("programs").select("*").eq("id", id).single()); },
     async saveProgram(id, content){ return must(await sb.from("programs").update({ content, updated_at: new Date().toISOString() }).eq("id", id).select().single()); },
@@ -405,6 +437,8 @@ async function childFormView(id){
     <div class="card stack"><h3>Support level</h3><p class="muted small">Pick the closest. You can change it any time.</p>
       <div class="levels">${Object.entries(SUP).map(([k,v]) => `<label class="level"><input type="radio" name="lvl" value="${k}" ${c.support_level === k ? "checked" : ""}><span><b>${v.label}</b><span>${v.blurb}</span></span></label>`).join("")}</div>
     </div>
+    <div class="card stack"><h3>Working level in each subject</h3><p class="muted small">Optional. Many children are ahead in one subject and behind in another. Choose the level they're really working at, and lessons and worksheets will match it. Leave a subject on "Not sure" and we'll go by age and support level.</p>
+      <div class="grid2" id="lvlBox"></div></div>
     <div class="card stack">
       <label class="f">How do they communicate? <small>e.g. nonverbal, uses an AAC app, gestalt scripts from ads and shows, a few signs, talks in sentences</small><input type="text" id="cComm" value="${esc(c.communication || "")}" maxlength="200"></label>
       <div class="stack" style="gap:8px"><label class="f" for="cInt">Favourite things <small>Shows, songs, jingles, places, games, toys. Press Enter after each one.</small></label>
@@ -437,7 +471,12 @@ async function childFormView(id){
   const hrs = m => { const h = Math.round(m / 6) / 10; return `${h} hour${h === 1 ? "" : "s"}`; };
   const drawRec = () => { const y = parseInt($("cYear").value, 10); const fw = FW[$("cState").value] || FW.WA; const r = window.SHE_recommendedTime(isNaN(y) ? null : new Date().getFullYear() - y, fw.areas);
     $("recText").textContent = `Recommended for ${r.stage.toLowerCase()} age: about ${hrs(r.perDay)} a day (${Math.round(r.weeklyMinutes/60)} hours a week), split across the learning areas. No state sets a legal minimum, but this matches published guidance and shows a moderator the curriculum is covered.`; };
-  drawRec(); $("cYear").oninput = drawRec; $("cState").onchange = drawRec;
+  let levels = { ...(c.levels || {}) };
+  const drawLevels = () => { const fw = FW[$("cState").value] || FW.WA;
+    $("lvlBox").innerHTML = fw.areas.map(a => `<label class="f">${esc(a)}<select data-lvl="${esc(a)}"><option value="">Not sure</option>${WORK_LEVELS.map(l => `<option ${levels[a] === l ? "selected" : ""}>${l}</option>`).join("")}</select></label>`).join("");
+    $("lvlBox").querySelectorAll("[data-lvl]").forEach(sel => sel.onchange = () => { if (sel.value) levels[sel.dataset.lvl] = sel.value; else delete levels[sel.dataset.lvl]; }); };
+  drawLevels();
+  drawRec(); $("cYear").oninput = drawRec; $("cState").onchange = () => { drawRec(); drawLevels(); };
   document.querySelectorAll("input[name=tmode]").forEach(r => r.onchange = () => $("adjBox").hidden = r.value !== "adjusted" || !r.checked);
   if (id) $("cDel").onclick = () => { $("delArea").innerHTML = `<div class="confirm">Delete ${esc(c.name)}, all their plans, and all their photos and videos? This can't be undone.<button class="btn danger small" type="button" id="dy">Delete</button><button class="btn quiet small" type="button" id="dn">Keep</button></div>`; $("dn").onclick = () => childFormView(id); $("dy").onclick = async () => { await db.deleteChild(id); toast("Profile deleted"); location.hash = "#/"; }; };
   $("cForm").onsubmit = async e => {
@@ -447,6 +486,7 @@ async function childFormView(id){
     const rec = { name, birth_year: isNaN(y) ? null : y, state: $("cState").value, support_level: document.querySelector("input[name=lvl]:checked")?.value || "high",
       communication: $("cComm").value.trim(), interests, sensory_notes: $("cSens").value.trim(), goals: $("cGoals").value.trim(),
       time_mode: document.querySelector("input[name=tmode]:checked")?.value || "recommended", time_reason: $("cReason").value.trim() || null };
+    const areasNow = (FW[rec.state] || FW.WA).areas; rec.levels = Object.fromEntries(Object.entries(levels).filter(([a]) => areasNow.includes(a)));
     rec.minutes_per_day = rec.time_mode === "adjusted" ? +$("cMin").value : window.SHE_dailyMinutes(rec);
     if (id) rec.id = id;
     try { const saved = await db.saveChild(rec); toast("Profile saved"); location.hash = `#/child/${saved.id}`; } catch(err){ $("cMsg").textContent = err.message; }
@@ -476,6 +516,7 @@ async function childView(id){
       ${t ? `<p><b>Term ${ti + 1}: ${esc(t.theme)}</b></p><ul style="margin:0;padding-left:20px">${(t.goals || []).map(g => `<li>${esc(g)}</li>`).join("")}</ul><p class="small muted">Weekly plans follow this term's theme and goals.</p>`
         : `<p class="small muted">Plan the whole year in 4 terms, each with a theme built on ${esc(c.name)}'s interests, goals, and a focus for every learning area. Weekly plans then follow the term.</p><div><a class="btn quiet" href="#/child/${id}/year/${yr}">Plan ${esc(c.name)}'s ${yr}</a></div>`}
       ${new Date().getMonth() >= 9 ? `<p class="small"><a href="#/child/${id}/year/${yr + 1}">Plan ${yr + 1} →</a></p>` : ""}</div>`; })() : ""}
+    ${LIVE ? `<a class="card stack reqcard" href="#/child/${id}/worksheets"><h2>Worksheets</h2><p class="small muted">Printable practice for any subject and topic, at ${esc(c.name)}'s level and themed on their interests, with an answer key.</p><span class="small" style="color:var(--accent);font-weight:700">Make a worksheet →</span></a>` : ""}
     ${LIVE ? `<a class="card stack reqcard" href="#/child/${id}/report"><h2>Progress report</h2><p class="small muted">Everything you've recorded, organised by learning area with photos and a written summary, ready for your ${c.state === "WA" ? "moderator" : "review or report"}.</p><span class="small" style="color:var(--accent);font-weight:700">Open the report →</span></a>` : ""}
     <form class="card stack" id="genForm">
       <h2>Plan a week</h2>
@@ -520,11 +561,12 @@ async function planView(id, dayIdx = 0){
       <dl>${l.goal ? `<dt>Goal</dt><dd>${esc(l.goal)}</dd>` : ""}${l.hook ? `<dt>Hook</dt><dd>${esc(l.hook)}</dd>` : ""}${l.materials ? `<dt>You'll need</dt><dd>${esc(l.materials)}</dd>` : ""}
         ${l.steps?.length ? `<dt>Steps</dt><dd><ol>${l.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></dd>` : ""}
         ${l.communication ? `<dt>Communication</dt><dd>${esc(l.communication)}</dd>` : ""}${l.adjustments ? `<dt>Adjustments</dt><dd>${esc(l.adjustments)}</dd>` : ""}${l.evidence ? `<dt>Evidence</dt><dd>${esc(l.evidence)}</dd>` : ""}</dl>
+      ${l.teach ? `<div class="teach"><b>Teach it</b><p>${esc(l.teach)}</p>${l.key_words?.length ? `<p class="small"><b>Key words:</b> ${l.key_words.map(esc).join(", ")}</p>` : ""}</div>` : (l.key_words?.length ? `<p class="small"><b>Key words:</b> ${l.key_words.map(esc).join(", ")}</p>` : "")}
       <div class="hpi"><span class="small muted">How did it go?</span>${[["H","Full help"],["P","Prompted"],["I","Independent"],["skipped","Skipped"]].map(([r,t]) => `<button type="button" data-r="${r}" aria-pressed="${lg.rating === r}">${t}</button>`).join("")}</div>
       ${LIVE ? `<div class="ev">${(evBy[key] || []).map(r => `<figure class="evi">${r.kind === "video" ? `<video src="${esc(r.url)}" controls playsinline preload="metadata"></video>` : `<a href="${esc(r.url)}" target="_blank" rel="noopener"><img src="${esc(r.url)}" alt="Evidence photo for ${esc(l.title)}" loading="lazy"></a>`}<button type="button" class="evx noprint" data-evdel="${r.id}" aria-label="Delete this ${r.kind}">✕</button></figure>`).join("")}
         <label class="evadd noprint"><input type="file" accept="image/*,video/*" data-evfile hidden><span>📷 Add photo or video</span></label></div><p class="small evmsg noprint" role="status"></p>` : ""}
       <input type="text" class="lnote noprint" placeholder="Quick note (optional)" value="${esc(lg.note || "")}" maxlength="300" aria-label="Note for ${esc(l.title)}">
-      <div class="row noprint"><button class="btn quiet small" type="button" data-edit>Edit lesson</button><button class="btn danger small" type="button" data-del>Remove</button></div>
+      <div class="row noprint">${LIVE ? `<button class="btn small" type="button" data-ws>📝 Make a worksheet</button>` : ""}<button class="btn quiet small" type="button" data-edit>Edit lesson</button><button class="btn danger small" type="button" data-del>Remove</button></div>
     </article>`; };
   view.innerHTML = `<div class="stack">${banner()}
     <p class="small noprint"><a href="#/child/${p.child_id}">← ${esc(c.name)}</a></p>
@@ -547,6 +589,11 @@ async function planView(id, dayIdx = 0){
     a.querySelector(".lnote").onchange = async e => { await db.log(id, key, (logs[key]||{}).rating || null, e.target.value); toast("Note saved"); };
     a.querySelector("[data-del]").onclick = async () => { if ((evBy[key] || []).length) { toast("Delete this lesson's photos and videos first"); return; } ct.days[d].lessons.splice(k,1); await db.savePlanContent(id, ct); toast("Lesson removed"); planView(id, dayIdx); };
     a.querySelector("[data-edit]").onclick = () => editLesson(a, ct, d, k, id, dayIdx);
+    const wsb = a.querySelector("[data-ws]");
+    if (wsb) wsb.onclick = async () => { const l = ct.days[d].lessons[k], m = a.querySelector(".evmsg");
+      wsb.disabled = true; if (m) m.innerHTML = `<span class="spinner"></span> Making a worksheet for this lesson. About a minute.`;
+      try { const w = await db.writeWorksheet(c, { subject: (l.areas || [])[0] || (ct.areas || [])[0] || "General", topic: l.title, lesson: [l.goal && "Goal: " + l.goal, l.hook && "Hook: " + l.hook, l.steps?.length && "Steps: " + l.steps.join(" ")].filter(Boolean).join(". "), plan_id: id, lesson_key: key }); location.hash = `#/worksheet/${w.id}`; }
+      catch(err){ wsb.disabled = false; if (m) m.innerHTML = err.code === "upgrade" ? `${esc(err.message)} <a href="#/billing">See plans</a>` : esc(err.message); } };
     const fin = a.querySelector("[data-evfile]"), msg = a.querySelector(".evmsg");
     if (fin) fin.onchange = async () => { const file = fin.files[0]; fin.value = ""; if (!file) return;
       const go = async () => {
@@ -571,6 +618,7 @@ async function planView(id, dayIdx = 0){
   $("pDel").onclick = () => { $("pDelArea").innerHTML = `<span class="confirm">Delete this plan, its records, and its photos and videos?<button class="btn danger small" type="button" id="pdy">Delete</button><button class="btn quiet small" type="button" id="pdn">Keep</button></span>`; $("pdn").onclick = () => planView(id, dayIdx); $("pdy").onclick = async () => { await db.deletePlan(id); toast("Plan deleted"); location.hash = `#/child/${p.child_id}`; }; };
 }
 
+const WORK_LEVELS = ["Early skills (before Foundation)", "Foundation", ...Array.from({ length: 10 }, (_, i) => `Year ${i + 1}`), "Years 11 and 12"];
 const PACK_NAME = { WA: "education program", NSW: "educational program", VIC: "learning plan", QLD: "educational program summary", SA: "12-month learning program", TAS: "Home Education Summary and Program (HESP)", ACT: "Statement of Intent draft", NT: "teaching, learning and assessment plan draft" };
 const PACK_TIP = {
   VIC: "The VRQA has optional Word templates for learning plans. You can paste these sections into a template or send this as your own plan.",
@@ -579,6 +627,82 @@ const PACK_TIP = {
   ACT: "Check the ACT Home Education team's current Statement of Intent form, and paste these sections into it.",
   TAS: "Each heading matches one of the Registrar's standards. Keep the headings bold when you paste it into your HESP."
 };
+/* ---------- Worksheets ---------- */
+const TOPIC_IDEAS = [
+  [/math/i, ["Counting to 10", "Numbers to 100", "Addition", "Subtraction", "Place value", "Money", "Telling the time", "Shapes", "Measuring length", "Fractions", "Times tables", "Graphs and data", "Patterns", "Problem solving"]],
+  [/english/i, ["Letter sounds", "Sight words", "Reading comprehension", "Rhyming words", "Sentences", "Punctuation", "Spelling", "Describing words", "Story writing", "Following instructions"]],
+  [/science/i, ["Living and non-living", "Animal habitats", "Plants", "The water cycle", "Weather and seasons", "Materials", "Push and pull", "Light and shadows", "The solar system", "The human body"]],
+  [/hass|hsie|human|social/i, ["My family", "My community", "Maps and directions", "Australian states and capitals", "Landforms", "Aboriginal and Torres Strait Islander cultures", "Then and now", "Rules and laws", "Needs and wants", "Countries of the world"]],
+  [/health|pdhpe|physical/i, ["Feelings", "Healthy food", "Keeping safe", "Hygiene", "Friendships", "Body parts", "Exercise", "Calm-down strategies"]],
+  [/art/i, ["Colours", "Music and rhythm", "Drawing faces", "Famous artists", "Instruments", "Patterns in art"]],
+  [/tech/i, ["Following steps (algorithms)", "Simple machines", "Design a toy", "Online safety", "Using a computer", "Materials for building"]],
+  [/language/i, ["Greetings", "Numbers in another language", "Colours in another language", "Key Word Sign: everyday words"]]
+];
+const topicIdeas = subj => (TOPIC_IDEAS.find(([re]) => re.test(subj)) || [null, []])[1];
+async function worksheetsView(childId){
+  const c = await db.child(childId); const fw = FW[c.state] || FW.WA; const list = await db.worksheets(childId);
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small"><a href="#/child/${childId}">← ${esc(c.name)}</a></p>
+    <h1>Worksheets for ${esc(c.name)}</h1>
+    <form class="card stack" id="wf">
+      <div class="grid2"><label class="f">Subject <select id="wSubj">${fw.areas.map(a => `<option>${esc(a)}</option>`).join("")}</select></label>
+        <label class="f">Level <select id="wLvl"><option value="">Match ${esc(c.name)}'s profile</option>${WORK_LEVELS.map(l => `<option>${l}</option>`).join("")}</select></label></div>
+      <label class="f">Topic <small>Anything you like, or tap an idea</small><input type="text" id="wTopic" maxlength="200" placeholder="e.g. Counting to 10, the water cycle, maps of our street"></label>
+      <div class="chips" id="wIdeas"></div>
+      <label class="f">How many questions? <select id="wCount"><option value="">Suggested for ${esc(c.name)}</option>${[3,4,5,6,8,10,12,15,20].map(n => `<option>${n}</option>`).join("")}</select></label>
+      <p id="wMsg" role="alert" style="color:var(--bad)"></p>
+      <div class="row"><button class="btn primary" type="submit" id="wGo">Make the worksheet</button><span id="wWait" hidden><span class="spinner"></span> Making it. About a minute.</span></div>
+    </form>
+    <div class="stack"><h2>Made so far</h2>${list.length ? `<div class="plans">${list.map(w => `<a class="planrow" href="#/worksheet/${w.id}"><span><b>${esc(w.title || w.topic)}</b><br><span class="muted small">${esc(w.subject)}${w.level ? ` · ${esc(w.level)}` : ""} · ${nice(iso(new Date(w.created_at)))}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : `<p class="muted">None yet. You can also make one from any lesson in a weekly plan.</p>`}</div>
+  </div>`;
+  const drawIdeas = () => { $("wIdeas").innerHTML = topicIdeas($("wSubj").value).map(t => `<button type="button" class="chip" data-idea="${esc(t)}">${esc(t)}</button>`).join(""); };
+  const syncLvl = () => { const l = (c.levels || {})[$("wSubj").value]; $("wLvl").options[0].textContent = l ? `${c.name}'s level (${l})` : `Match ${c.name}'s age and support level`; };
+  drawIdeas(); syncLvl(); $("wSubj").onchange = () => { drawIdeas(); syncLvl(); };
+  $("wIdeas").onclick = e => { const b = e.target.closest("[data-idea]"); if (b) $("wTopic").value = b.dataset.idea; };
+  $("wf").onsubmit = async e => { e.preventDefault(); const topic = $("wTopic").value.trim(); if (!topic) { $("wMsg").textContent = "Type a topic, or tap one of the ideas."; return; }
+    $("wGo").disabled = true; $("wWait").hidden = false; $("wMsg").textContent = "";
+    try { const w = await db.writeWorksheet(c, { subject: $("wSubj").value, level: $("wLvl").value, topic, count: +$("wCount").value || null }); location.hash = `#/worksheet/${w.id}`; }
+    catch(err){ $("wGo").disabled = false; $("wWait").hidden = true; $("wMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+}
+function wsItemHTML(it, n){
+  const lines = k => `<div class="wlines">${"<span></span>".repeat(k)}</div>`;
+  const body = {
+    choice: () => `<div class="wopts">${(it.options || []).map(o => `<span class="wopt">${esc(o)}</span>`).join("")}</div>`,
+    count: () => `<div class="wvis">${esc(it.visual)}</div><div class="wbox">Answer: <span class="wblank"></span></div>`,
+    match: () => `<div class="wmatch"><div>${(it.pairs || []).map(p => `<span>${esc(p.left)} ●</span>`).join("")}</div><div>${(it.pairs || []).map(p => p.right).sort((a, b) => a.localeCompare(b)).map(r => `<span>● ${esc(r)}</span>`).join("")}</div></div>`,
+    draw: () => `${it.visual ? `<div class="wvis">${esc(it.visual)}</div>` : ""}<div class="wdraw"></div>`,
+    fill: () => it.visual ? `<div class="wvis">${esc(it.visual)}</div>` : "",
+    write: () => `${it.visual ? `<div class="wvis">${esc(it.visual)}</div>` : ""}${lines(2)}`
+  }[it.type] || (() => lines(2));
+  return `<li class="witem"><p class="wq"><b>${n}.</b> ${esc(it.prompt).replace(/_{2,}/g, '<span class="wblank"></span>')}</p>${body()}</li>`;
+}
+async function worksheetView(id){
+  const w = await db.worksheet(id); const c = await db.child(w.child_id).catch(() => ({ name: "" })); const ct = w.content || { sections: [] };
+  let n = 0; const items = ct.sections.flatMap(s => s.items);
+  let showKey = false;
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small noprint"><a href="#/child/${w.child_id}/worksheets">← Worksheets</a></p>
+    <div class="row noprint"><button class="btn primary" type="button" id="wPrint">Print or save as PDF</button><label class="row small"><input type="checkbox" id="wKey"> Include the answer key</label><button class="btn quiet" type="button" id="wAgain">Make another like this</button><span id="wDelArea"><button class="btn danger" type="button" id="wDel">Delete</button></span></div>
+    <p id="wMsg" class="small noprint" role="status"></p>
+    <article class="sheet">
+      <div class="sheethead"><span>Name: <span class="wblank wide"></span></span><span>Date: <span class="wblank"></span></span></div>
+      <h1>${esc(ct.title || w.topic)}</h1>
+      <p class="muted small">${esc(w.subject)}${w.level ? ` · ${esc(w.level)}` : ""}</p>
+      ${ct.intro ? `<p>${esc(ct.intro)}</p>` : ""}
+      ${ct.teach ? `<div class="teach"><b>Let's learn</b><p>${esc(ct.teach)}</p>${ct.key_words?.length ? `<p class="small"><b>Key words:</b> ${ct.key_words.map(esc).join(" · ")}</p>` : ""}</div>` : ""}
+      ${ct.sections.map(s => `<section class="wsec"><h2>${esc(s.heading)}</h2><ol class="witems">${s.items.map(it => wsItemHTML(it, ++n)).join("")}</ol></section>`).join("")}
+      <p class="wdone">Well done! ⭐</p>
+    </article>
+    <article class="sheet anskey" id="ansKey" hidden><h2>Answer key: ${esc(ct.title || w.topic)}</h2><ol>${items.map(it => `<li>${esc(it.type === "match" && it.pairs?.length ? it.pairs.map(p => `${p.left} → ${p.right}`).join("; ") : it.answer)}</li>`).join("")}</ol></article>
+  </div>`;
+  $("wKey").onchange = e => { $("ansKey").hidden = !e.target.checked; };
+  $("wPrint").onclick = () => window.print();
+  $("wAgain").onclick = async () => { $("wAgain").disabled = true; $("wMsg").innerHTML = `<span class="spinner"></span> Making another one. About a minute.`;
+    try { const nw = await db.writeWorksheet(c, { subject: w.subject, level: w.level || "", topic: w.topic, lesson: "Make all-new questions, different from the last worksheet on this topic.", plan_id: w.plan_id, lesson_key: w.lesson_key }); location.hash = `#/worksheet/${nw.id}`; }
+    catch(err){ $("wAgain").disabled = false; $("wMsg").textContent = err.message; } };
+  $("wDel").onclick = () => { $("wDelArea").innerHTML = `<span class="confirm">Delete this worksheet?<button class="btn danger small" type="button" id="wy">Delete</button><button class="btn quiet small" type="button" id="wn">Keep</button></span>`; $("wn").onclick = () => worksheetView(id); $("wy").onclick = async () => { await db.deleteWorksheet(id); toast("Deleted"); location.hash = `#/child/${w.child_id}/worksheets`; }; };
+}
+
 /* ---------- Progress report ---------- */
 function compileReport(data, areasList){
   const RL = { H: "Full help", P: "Prompted", I: "Independent", skipped: "Skipped" };
@@ -963,6 +1087,8 @@ async function route(){
   if (LIVE && (m = h.match(/^\/program\/([\w-]+)$/))) return guard(() => programView(m[1]));
   if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/year\/(\d{4})$/))) return guard(() => yearView(m[1], +m[2]));
   if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/report$/))) return guard(() => reportView(m[1]));
+  if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/worksheets$/))) return guard(() => worksheetsView(m[1]));
+  if (LIVE && (m = h.match(/^\/worksheet\/([\w-]+)$/))) return guard(() => worksheetView(m[1]));
   if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));
   if ((m = h.match(/^\/plan\/([\w-]+)$/))) return guard(() => planView(m[1]));
   return guard(homeView);

@@ -155,6 +155,8 @@ function clean(plan: any, areas: string[]) {
         communication: asStr(l?.communication, 300),
         adjustments: asStr(l?.adjustments, 300),
         evidence: asStr(l?.evidence, 200),
+        teach: asStr(l?.teach, 1200),
+        key_words: arr(l?.key_words).map((w: unknown) => asStr(w, 40)).filter(Boolean).slice(0, 6),
       })),
     })),
   };
@@ -182,10 +184,11 @@ Deno.serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
-  const { child_id, week_start, focus, extra, kind, answers, year, facts, from, to } = body ?? {};
-  const isProgram = kind === "program", isYear = kind === "year", isReport = kind === "report";
+  const { child_id, week_start, focus, extra, kind, answers, year, facts, from, to, ws } = body ?? {};
+  const isProgram = kind === "program", isYear = kind === "year", isReport = kind === "report", isSheet = kind === "worksheet";
+  if (isSheet && (!ws?.subject || !String(ws?.topic ?? "").trim())) return json({ error: "Choose a subject and a topic." }, 400);
   if (isReport && (!/^\d{4}-\d{2}-\d{2}$/.test(from ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(to ?? "") || !facts)) return json({ error: "Choose a period with some records first." }, 400);
-  if (!child_id || (!isProgram && !isYear && !isReport && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
+  if (!child_id || (!isProgram && !isYear && !isReport && !isSheet && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
   if (isYear && !(Number(year) >= 2020 && Number(year) <= 2100)) return json({ error: "Choose a year." }, 400);
 
   const { data: child, error: childErr } = await userClient.from("children").select("*").eq("id", child_id).single();
@@ -218,7 +221,7 @@ Write in plain Australian English for a tired parent: short sentences, concrete 
   const interests: string[] = (child.interests || []).length ? child.interests : ["their favourite things"];
   // Weekly plans follow the year plan's term theme and focus, when there is one
   let termNote = "";
-  if (!isProgram && !isYear && !isReport && week_start) {
+  if (!isProgram && !isYear && !isReport && !isSheet && week_start) {
     const wy = Number(week_start.slice(0, 4)), wm = Number(week_start.slice(5, 7));
     const ti = wm <= 4 ? 0 : wm <= 6 ? 1 : wm <= 9 ? 2 : 3;
     const { data: yp } = await userClient.from("year_plans").select("content").eq("child_id", child_id).eq("year", wy).maybeSingle();
@@ -237,6 +240,7 @@ Build this week's lessons around the term theme and goals.`;
 - Interests: ${interests.join(", ")}
 - Sensory notes: ${child.sensory_notes || "none"}
 - Parent's goals: ${child.goals || "none"}
+- Working level by subject: ${Object.keys(child.levels ?? {}).length ? Object.entries(child.levels).map(([k, v]) => `${k}: ${v}`).join("; ") : "not set (judge from age and support level)"}
 - Learning time: about ${minutes} minutes a day${adjusted ? ` (reduced by the parent: ${child.time_reason || "no reason given"})` : ` (recommended for ${rec.stage.toLowerCase()} age)`}
 ${focus ? `- Focus this week: ${String(focus).slice(0, 300)}` : ""}
 ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}
@@ -256,6 +260,8 @@ ${termNote}`;
       communication: { ...str, description: "Phrase, sign or AAC word to model" },
       adjustments: str,
       evidence: { ...str, description: "What to photo, video or record" },
+      teach: { ...str, description: "For low support and advanced learners: a short explanation of the content (3-5 sentences) the parent can read aloud or the child can read. Otherwise an empty string." },
+      key_words: { type: "array", items: str, maxItems: 6, description: "Key vocabulary for the lesson, or empty" },
     },
     required: ["title", "areas", "minutes", "goal", "hook", "steps", "communication", "adjustments", "evidence"],
   };
@@ -298,6 +304,53 @@ ${termNote}`;
     }
     if (lastGood) return lastGood;
     throw new Error("planner failed");
+  }
+
+  // ---------- Worksheet: printable practice for any subject, level and topic ----------
+  if (isSheet) {
+    const subj = String(ws.subject).slice(0, 80), lvl = String(ws.level || child.levels?.[ws.subject] || "").slice(0, 60), topic = String(ws.topic).slice(0, 200);
+    const n = Math.max(3, Math.min(20, Number(ws.count) || (child.support_level === "high" ? 4 : child.support_level === "moderate" ? 6 : 10)));
+    const sPrompt = `${profile}
+
+Make a printable worksheet.
+- Subject: ${subj} (${fw.name})
+- Level: ${lvl || `judge from age ${age ?? "unknown"} and support level`}
+- Topic: ${topic}
+${ws.lesson ? `- It goes with this lesson: ${String(ws.lesson).slice(0, 800)}` : ""}
+- About ${n} questions or tasks in total.
+
+Rules:
+- Match the curriculum content for this subject at this level, adjusted to the child. Theme the questions around the child's interests.
+- High support: very few words, one task per item, lots of visual items using emoji (counting, matching, circling), no long reading. Moderate: short sentences, visual supports, choice items. Low support and advanced: proper school-style work, including written answers, problem solving and some challenge items.
+- Item types: "choice" (circle the answer: prompt + 2-4 options), "write" (short written answer), "count" (prompt + a visual of repeated emoji to count), "match" (pairs to join: left and right), "draw" (draw or label something), "fill" (a sentence with ___ to fill).
+- Every item needs a correct answer for the answer key (for "draw" give what a good answer includes).
+- Include a short "teach" box (2-5 sentences explaining the idea, in child-friendly words) and up to 6 key words.
+- Plain Australian English, metric units, Australian money, places and examples. Respectful and encouraging.`;
+    const itemSchema = { type: "object", properties: { type: { type: "string", enum: ["choice", "write", "count", "match", "draw", "fill"] }, prompt: { type: "string" }, options: { type: "array", items: { type: "string" } }, visual: { type: "string" }, pairs: { type: "array", items: { type: "object", properties: { left: { type: "string" }, right: { type: "string" } }, required: ["left", "right"] } }, answer: { type: "string" } }, required: ["type", "prompt", "answer"] };
+    const sSchema = { type: "object", properties: { title: { type: "string" }, intro: { type: "string" }, teach: { type: "string" }, key_words: { type: "array", items: { type: "string" } }, sections: { type: "array", minItems: 1, maxItems: 4, items: { type: "object", properties: { heading: { type: "string" }, items: { type: "array", items: itemSchema } }, required: ["heading", "items"] } } }, required: ["title", "sections"] };
+    const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start: new Date().toISOString().slice(0, 10) }).select("id").single();
+    if (jobErr || !job) return json({ error: "Couldn't start writing. Please try again." }, 500);
+    const setJob = (f: Record<string, unknown>) => admin.from("plan_jobs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", job.id);
+    const t = (v: unknown, m: number) => String(v ?? "").slice(0, m);
+    const work = async () => {
+      try {
+        const out = obj(await callTool(sPrompt, "save_worksheet", sSchema, 8000, (d) => arr(d?.sections).some((x: any) => arr(obj(x)?.items).length)));
+        const sections = arr(out.sections).map(obj).slice(0, 4).map((x: any) => ({ heading: t(x.heading, 120), items: arr(x.items).map(obj).slice(0, 25).map((it: any) => ({
+          type: ["choice", "write", "count", "match", "draw", "fill"].includes(it.type) ? it.type : "write", prompt: t(it.prompt, 500),
+          options: arr(it.options).map((o: unknown) => t(o, 120)).slice(0, 5), visual: t(it.visual, 200),
+          pairs: arr(it.pairs).map(obj).map((pp: any) => ({ left: t(pp.left, 120), right: t(pp.right, 120) })).slice(0, 8), answer: t(it.answer, 400),
+        })).filter((it: any) => it.prompt) })).filter((x: any) => x.items.length);
+        if (!sections.length) { await setJob({ status: "failed", error: "The worksheet came back empty. Please try again." }); return; }
+        await admin.from("generations").insert({ parent_id: user!.id });
+        const content = { title: t(out.title, 120) || topic, intro: t(out.intro, 400), teach: t(out.teach, 1500), key_words: arr(out.key_words).map((w: unknown) => t(w, 40)).slice(0, 6), sections };
+        const { data: saved, error } = await admin.from("worksheets").insert({ parent_id: user!.id, child_id, plan_id: ws.plan_id || null, lesson_key: ws.lesson_key || null, subject: subj, level: lvl || null, topic, content }).select("id").single();
+        if (error || !saved) { console.error("Worksheet save failed", error); await setJob({ status: "failed", error: "Couldn't save the worksheet. Please try again." }); return; }
+        await setJob({ status: "done", worksheet_id: saved.id, progress: 5 });
+      } catch (e) { console.error("Worksheet failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
+    };
+    // @ts-ignore EdgeRuntime is provided by Supabase
+    EdgeRuntime.waitUntil(work());
+    return json({ job_id: job.id }, 202);
   }
 
   // ---------- Progress report: a written summary from the family's own records ----------
@@ -439,7 +492,8 @@ Write ${DAYS[i]}'s lessons for the week starting ${week_start} (day ${i + 1} of 
 - Day themes to avoid repeating across the week: Monday home and routines, Tuesday community and shopping, Wednesday science and nature, Thursday arts and music, Friday fun day and outings.
 ${dayTargets ? `- Minutes to aim for today in each learning area (a lesson's minutes are shared between its areas): ${dayTargets}.` : `- Cover several learning areas today, with the most time on ${fw.areas[0]} and ${fw.areas[1]}.`}
 - Each lesson lists 1 to 3 learning areas. Pitch goals at the child's real level, not their age.
-- Keep text short: one-sentence steps, 3-5 steps per lesson.`;
+- Keep text short: one-sentence steps, 3-5 steps per lesson.
+- Use the child's working level for each subject when it's set. For low support and advanced learners, include real curriculum content: a short "teach" explanation and key words, like a good school lesson (for example how the water cycle works, place value, mapping our local area).`;
   const overviewPrompt = `${profile}
 
 Give this week's plan (starting ${week_start}) a short title, a two-sentence summary for the parent, and 3-5 focus goals for the week, written as observable skills at the child's real level.`;
