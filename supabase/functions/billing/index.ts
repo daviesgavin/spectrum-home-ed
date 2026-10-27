@@ -40,6 +40,38 @@ Deno.serve(async (req) => {
   const { data: sub } = await admin.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
 
   try {
+    // Delete the whole account: cancel Stripe, remove photos and videos, then the user (database rows cascade).
+    if (body.action === "delete_account") {
+      const email = (user.email ?? "").toLowerCase();
+      if (String(body.confirm_email ?? "").trim().toLowerCase() !== email) return json({ error: "Type your email address exactly to confirm." }, 400);
+      if (email === "daviesgavin@hotmail.com") return json({ error: "The owner account can't be deleted from the app." }, 403);
+      if (sub?.stripe_subscription_id && ["active", "trialing", "past_due", "unpaid", "incomplete"].includes(sub.status)) {
+        try { await stripe.subscriptions.cancel(sub.stripe_subscription_id); }
+        catch (e: any) { if (e?.code !== "resource_missing") { console.error("Cancel failed", e); return json({ error: "Couldn't cancel your subscription. Please try again, or email hello@spectrumhomeed.com." }, 502); } }
+      }
+      // Files: everything under this user's folder in the evidence bucket
+      const bucket = admin.storage.from("evidence");
+      const paths: string[] = [];
+      const { data: rows } = await admin.from("evidence").select("path").eq("parent_id", user.id);
+      (rows ?? []).forEach((r: any) => paths.push(r.path));
+      const { data: folders } = await bucket.list(user.id, { limit: 1000 });
+      for (const f of folders ?? []) {
+        const { data: files } = await bucket.list(`${user.id}/${f.name}`, { limit: 1000 });
+        (files ?? []).forEach((x: any) => paths.push(`${user.id}/${f.name}/${x.name}`));
+      }
+      const unique = [...new Set(paths)];
+      for (let i = 0; i < unique.length; i += 100) {
+        const { error } = await bucket.remove(unique.slice(i, i + 100));
+        if (error) { console.error("File delete failed", error); return json({ error: "Couldn't delete your photos and videos. Please try again." }, 500); }
+      }
+      await admin.from("comp_access").delete().eq("email", email);
+      await admin.from("admins").delete().eq("email", email);
+      const { error: delErr } = await admin.auth.admin.deleteUser(user.id);
+      if (delErr) { console.error("User delete failed", delErr); return json({ error: "Couldn't delete your account. Please email hello@spectrumhomeed.com." }, 500); }
+      console.log("Account deleted", user.id, `${unique.length} files`);
+      return json({ deleted: true });
+    }
+
     if (body.action === "portal") {
       if (!sub?.stripe_customer_id) return json({ error: "No subscription found for this account." }, 404);
       const portal = await stripe.billingPortal.sessions.create({ customer: sub.stripe_customer_id, return_url: `${APP_URL}#/billing` });

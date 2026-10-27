@@ -311,7 +311,7 @@ async function homeView(){
   const [kids, acc] = await Promise.all([db.children(), db.access()]);
   try { acc.is_admin ? localStorage.setItem("she-admin", "1") : localStorage.removeItem("she-admin"); } catch(e){}
   view.innerHTML = `<div class="stack">${banner()}
-    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>Your family</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span><a class="small" href="#/billing">Plans and billing</a>${acc.is_admin ? `<a class="small" href="#/admin">Admin dashboard</a>` : ""}</div>` : ""}</div><a class="btn primary" href="#/child/new">Add a child</a></div>
+    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>Your family</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span><a class="small" href="#/billing">Account and billing</a>${acc.is_admin ? `<a class="small" href="#/admin">Admin dashboard</a>` : ""}</div>` : ""}</div><a class="btn primary" href="#/child/new">Add a child</a></div>
     ${kids.length ? `<div class="kids">${kids.map(k => `<a class="card kid" href="#/child/${k.id}">
         <div class="row" style="justify-content:space-between"><h2>${esc(k.name)}</h2><span class="chip">${esc(k.state)}</span></div>
         <p class="muted small">${age(k.birth_year) ? `Age ${age(k.birth_year)} · ` : ""}${esc(SUP[k.support_level]?.label || "")}</p>
@@ -519,7 +519,7 @@ async function billingView(){
   const draw = () => {
     view.innerHTML = `<div class="stack">
       <p class="small"><a href="#/">← Your family</a></p>
-      <h1>Plans and billing</h1>
+      <h1>Account and billing</h1>
       ${status === "success" ? `<p class="banner">${acc.subscribed ? "Thank you! Your subscription is active." : "Thanks! Your payment went through. It can take a minute to show here; refresh shortly."}</p>` : ""}
       ${status === "cancelled" ? `<p class="banner">Checkout was cancelled. You haven't been charged.</p>` : ""}
       ${acc.comp ? `<div class="card stack"><h2>You have free access</h2><p>Your account is on the free access list, so there's nothing to pay. You get unlimited personalised plans.</p></div>` :
@@ -530,7 +530,28 @@ async function billingView(){
           <div><button class="btn primary" type="button" data-plan="${p.key}_${period}">Choose ${p.name}</button></div></div>`).join("")}</div>
         <p class="small muted">Prices in Australian dollars, including GST where applicable. Cancel any time. Payments are handled securely by Stripe.</p>`}
       <p id="bMsg" role="alert" style="color:var(--bad)"></p>
+      <div class="card stack" style="margin-top:24px"><h2>Delete my account</h2>
+        <p>This permanently deletes your account, every child profile, all plans and records, and every photo and video. ${acc.subscribed ? "Your subscription will be cancelled straight away. " : ""}It can't be undone.</p>
+        <p class="small muted">Payment records are kept for tax purposes, as our <a href="../privacy.html#keep" target="_blank" rel="noopener">Privacy Policy</a> explains. If you want to keep anything, print your plans first.</p>
+        <div id="delArea"><button class="btn danger" type="button" id="delStart">Delete my account</button></div>
+      </div>
     </div>`;
+    const bindDel = () => { $("delStart").onclick = () => {
+      $("delArea").innerHTML = `<div class="stack"><label class="f">To confirm, type your email address <input type="email" id="delEmail" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <p id="delMsg" role="alert" style="color:var(--bad)"></p>
+        <div class="row"><button class="btn danger" type="button" id="delGo">Delete everything</button><button class="btn quiet" type="button" id="delKeep">Keep my account</button></div></div>`;
+      $("delKeep").onclick = () => { $("delArea").innerHTML = `<button class="btn danger" type="button" id="delStart">Delete my account</button>`; bindDel(); };
+      $("delGo").onclick = async () => { const em = $("delEmail").value.trim();
+        if (em.toLowerCase() !== (user?.email || "").toLowerCase()) { $("delMsg").textContent = "That doesn't match the email you signed in with."; return; }
+        $("delGo").disabled = true; $("delMsg").innerHTML = `<span class="spinner"></span> Deleting…`;
+        try { await db.billing({ action: "delete_account", confirm_email: em });
+          try { localStorage.removeItem("she-admin"); } catch(e){}
+          await db.signOut().catch(() => {}); user = null;
+          view.innerHTML = `<div class="authbox stack"><h1>Your account has been deleted</h1><p>Everything about your family has been removed. Thank you for using Spectrum Home Ed.</p><p><a href="../">Back to the home page</a></p></div>`;
+          $("acct").hidden = true;
+        } catch(e){ $("delMsg").textContent = e.message; $("delGo").disabled = false; } };
+    }; };
+    bindDel();
     view.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { period = b.dataset.p; draw(); });
     view.querySelectorAll("[data-plan]").forEach(b => b.onclick = async () => { b.disabled = true; $("bMsg").textContent = ""; try { const r = await db.billing({ plan: b.dataset.plan }); location.href = r.url; } catch(e){ $("bMsg").textContent = e.message; b.disabled = false; } });
     if ($("portal")) $("portal").onclick = async () => { try { const r = await db.billing({ action: "portal" }); location.href = r.url; } catch(e){ $("bMsg").textContent = e.message; } };
