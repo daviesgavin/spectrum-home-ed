@@ -182,9 +182,10 @@ Deno.serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
-  const { child_id, week_start, focus, extra, kind, answers, year } = body ?? {};
-  const isProgram = kind === "program", isYear = kind === "year";
-  if (!child_id || (!isProgram && !isYear && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
+  const { child_id, week_start, focus, extra, kind, answers, year, facts, from, to } = body ?? {};
+  const isProgram = kind === "program", isYear = kind === "year", isReport = kind === "report";
+  if (isReport && (!/^\d{4}-\d{2}-\d{2}$/.test(from ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(to ?? "") || !facts)) return json({ error: "Choose a period with some records first." }, 400);
+  if (!child_id || (!isProgram && !isYear && !isReport && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
   if (isYear && !(Number(year) >= 2020 && Number(year) <= 2100)) return json({ error: "Choose a year." }, 400);
 
   const { data: child, error: childErr } = await userClient.from("children").select("*").eq("id", child_id).single();
@@ -217,7 +218,7 @@ Write in plain Australian English for a tired parent: short sentences, concrete 
   const interests: string[] = (child.interests || []).length ? child.interests : ["their favourite things"];
   // Weekly plans follow the year plan's term theme and focus, when there is one
   let termNote = "";
-  if (!isProgram && !isYear && week_start) {
+  if (!isProgram && !isYear && !isReport && week_start) {
     const wy = Number(week_start.slice(0, 4)), wm = Number(week_start.slice(5, 7));
     const ti = wm <= 4 ? 0 : wm <= 6 ? 1 : wm <= 9 ? 2 : 3;
     const { data: yp } = await userClient.from("year_plans").select("content").eq("child_id", child_id).eq("year", wy).maybeSingle();
@@ -297,6 +298,43 @@ ${termNote}`;
     }
     if (lastGood) return lastGood;
     throw new Error("planner failed");
+  }
+
+  // ---------- Progress report: a written summary from the family's own records ----------
+  if (isReport) {
+    const rPrompt = `${profile}
+
+Write ${child.name}'s home education progress report for ${from} to ${to}, for the parent to give to ${fw.regulator}.
+Use ONLY these records from the family's app. Don't invent results, test scores or events. If a learning area has few records, say so honestly and briefly.
+
+${String(facts).slice(0, 12000)}
+
+Sections, in this order, with these exact headings:
+1. Overview: 2 or 3 short paragraphs on the period: what we focused on, how ${child.name} engaged, the biggest wins.
+2. Progress by learning area: for each learning area with records, 2 to 4 sentences on what was covered and what changed (for example more lessons done independently). Start each area on a new line with the area name and a colon.
+3. Communication and independence: how communication and independence grew, using the help levels (full help, prompted, independent).
+4. Wellbeing and social interaction: regulation, community outings and social contact shown in the records.
+5. Next steps: 3 to 5 bullet points for the next period.
+
+Write as the parent, first person, plain Australian English, respectful and neuro-affirming. Short paragraphs, "- " bullets, no markdown headings or bold.`;
+    const rSchema = { type: "object", properties: { sections: { type: "array", minItems: 5, items: { type: "object", properties: { heading: { type: "string" }, body: { type: "string" } }, required: ["heading", "body"] } } }, required: ["sections"] };
+    const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start: to }).select("id").single();
+    if (jobErr || !job) return json({ error: "Couldn't start writing. Please try again." }, 500);
+    const setJob = (f: Record<string, unknown>) => admin.from("plan_jobs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", job.id);
+    const work = async () => {
+      try {
+        const out = obj(await callTool(rPrompt, "save_report", rSchema, 8000, (d) => arr(d?.sections).length >= 3));
+        const sections = arr(out.sections).map(obj).map((x: any) => ({ heading: String(x.heading ?? "").slice(0, 120), body: String(x.body ?? "").slice(0, 8000) })).filter((x: any) => x.heading && x.body);
+        if (!sections.length) { await setJob({ status: "failed", error: "The report came back empty. Please try again." }); return; }
+        await admin.from("generations").insert({ parent_id: user!.id });
+        const { data: saved, error } = await admin.from("reports").insert({ parent_id: user!.id, child_id, period_start: from, period_end: to, content: { sections } }).select("id").single();
+        if (error || !saved) { console.error("Report save failed", error); await setJob({ status: "failed", error: "Couldn't save the report. Please try again." }); return; }
+        await setJob({ status: "done", report_id: saved.id, progress: 5 });
+      } catch (e) { console.error("Report failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
+    };
+    // @ts-ignore EdgeRuntime is provided by Supabase
+    EdgeRuntime.waitUntil(work());
+    return json({ job_id: job.id }, 202);
   }
 
   // ---------- Year plan: 4 terms, each with a theme, goals and a focus per learning area ----------

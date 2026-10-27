@@ -85,6 +85,11 @@ textarea{min-height:72px;resize:vertical}
 .hpi{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ev{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
 .reqcard{text-decoration:none;color:inherit}
+.big{font-family:var(--display);font-size:28px;font-weight:800;font-variant-numeric:tabular-nums}
+.evgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.evgrid figure{margin:0;display:flex;flex-direction:column;gap:4px}
+.evgrid img,.evgrid video{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:#000}
+@media print{.evgrid video{display:none}.evgrid figure{break-inside:avoid}}
 .term input[type=text],.term textarea{width:100%}
 @media print{.term{break-inside:avoid-page}}
 .psec textarea{width:100%;font:16px/1.55 var(--body);padding:12px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);resize:vertical;min-height:120px}
@@ -227,7 +232,7 @@ if (LIVE) {
         const { data: j } = await sb.from("plan_jobs").select("status,progress,plan_id,program_id,error").eq("id", jobId).maybeSingle();
         if (!j) continue;
         if (typeof onProgress === "function") onProgress(j.progress || 0);
-        if (j.status === "done" && (j.plan_id || j.program_id || j.year_plan_id)) return j;
+        if (j.status === "done" && (j.plan_id || j.program_id || j.year_plan_id || j.report_id)) return j;
         if (j.status === "failed") throw new Error(j.error || "The writer had a problem. Please try again.");
       }
       throw new Error("This is taking longer than usual. Check back in a few minutes; it will appear when it's ready.");
@@ -241,6 +246,24 @@ if (LIVE) {
     async saveYear(id, content){ return must(await sb.from("year_plans").update({ content, updated_at: new Date().toISOString() }).eq("id", id).select().single()); },
     async writeYear(child, year, extra){
       const r = await sb.functions.invoke("generate-plan", { body:{ kind: "year", child_id: child.id, year, extra } });
+      if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
+      return this.waitJob(r.data.job_id);
+    },
+    async reportData(childId, from, to){
+      const plans = must(await sb.from("plans").select("*").eq("child_id", childId).gte("week_start", from).lte("week_start", to).order("week_start"));
+      const ids = plans.map(p => p.id);
+      const logs = ids.length ? must(await sb.from("lesson_logs").select("*").in("plan_id", ids)) : [];
+      let ev = must(await sb.from("evidence").select("*").eq("child_id", childId).gte("taken_on", from).lte("taken_on", to).order("taken_on"));
+      if (ev.length) { const { data: urls } = await sb.storage.from("evidence").createSignedUrls(ev.map(r => r.path), 3600); const map = Object.fromEntries((urls || []).map(u => [u.path, u.signedUrl])); ev = ev.map(r => ({ ...r, url: map[r.path] || "" })); }
+      const years = [...new Set([from.slice(0,4), to.slice(0,4)].map(Number))];
+      const yps = must(await sb.from("year_plans").select("year,content").eq("child_id", childId).in("year", years));
+      return { plans, logs, ev, yps };
+    },
+    async reports(childId){ return must(await sb.from("reports").select("*").eq("child_id", childId).order("created_at", { ascending:false })); },
+    async saveReport(id, content){ return must(await sb.from("reports").update({ content, updated_at: new Date().toISOString() }).eq("id", id).select().single()); },
+    async deleteReport(id){ must(await sb.from("reports").delete().eq("id", id)); },
+    async writeReport(child, from, to, facts){
+      const r = await sb.functions.invoke("generate-plan", { body:{ kind: "report", child_id: child.id, from, to, facts } });
       if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
       return this.waitJob(r.data.job_id);
     },
@@ -453,6 +476,7 @@ async function childView(id){
       ${t ? `<p><b>Term ${ti + 1}: ${esc(t.theme)}</b></p><ul style="margin:0;padding-left:20px">${(t.goals || []).map(g => `<li>${esc(g)}</li>`).join("")}</ul><p class="small muted">Weekly plans follow this term's theme and goals.</p>`
         : `<p class="small muted">Plan the whole year in 4 terms, each with a theme built on ${esc(c.name)}'s interests, goals, and a focus for every learning area. Weekly plans then follow the term.</p><div><a class="btn quiet" href="#/child/${id}/year/${yr}">Plan ${esc(c.name)}'s ${yr}</a></div>`}
       ${new Date().getMonth() >= 9 ? `<p class="small"><a href="#/child/${id}/year/${yr + 1}">Plan ${yr + 1} →</a></p>` : ""}</div>`; })() : ""}
+    ${LIVE ? `<a class="card stack reqcard" href="#/child/${id}/report"><h2>Progress report</h2><p class="small muted">Everything you've recorded, organised by learning area with photos and a written summary, ready for your ${c.state === "WA" ? "moderator" : "review or report"}.</p><span class="small" style="color:var(--accent);font-weight:700">Open the report →</span></a>` : ""}
     <form class="card stack" id="genForm">
       <h2>Plan a week</h2>
       <div class="grid2">
@@ -555,6 +579,80 @@ const PACK_TIP = {
   ACT: "Check the ACT Home Education team's current Statement of Intent form, and paste these sections into it.",
   TAS: "Each heading matches one of the Registrar's standards. Keep the headings bold when you paste it into your HESP."
 };
+/* ---------- Progress report ---------- */
+function compileReport(data, areasList){
+  const RL = { H: "Full help", P: "Prompted", I: "Independent", skipped: "Skipped" };
+  const logBy = {}; data.logs.forEach(l => logBy[l.plan_id + "|" + l.lesson_key] = l);
+  const rows = [];
+  data.plans.forEach(p => (p.content?.days || []).forEach((d, di) => (d.lessons || []).forEach((l, k) => {
+    const lg = logBy[p.id + "|" + `${di}-${k}`]; if (!lg || (!lg.rating && !lg.note)) return;
+    const date = new Date(p.week_start + "T00:00:00"); date.setDate(date.getDate() + di);
+    rows.push({ date: iso(date), title: l.title, areas: l.areas || [], minutes: l.minutes || 0, rating: lg.rating, note: lg.note || "" }); })));
+  rows.sort((a, b) => a.date.localeCompare(b.date));
+  const blank = () => ({ lessons: 0, minutes: 0, H: 0, P: 0, I: 0, ev: [] });
+  const areas = {}; (areasList || []).forEach(a => areas[a] = blank());
+  rows.forEach(r => { if (!r.rating || r.rating === "skipped") return; const share = r.minutes / Math.max(1, r.areas.length);
+    r.areas.forEach(a => { const x = areas[a] ||= blank(); x.lessons++; x.minutes += share; x[r.rating]++; }); });
+  data.ev.forEach(e => (e.areas?.length ? e.areas : ["Other"]).forEach(a => (areas[a] ||= blank()).ev.push(e)));
+  const rated = rows.filter(r => ["H","P","I"].includes(r.rating)); const half = Math.floor(rated.length / 2);
+  const pct = list => list.length ? Math.round(list.filter(r => r.rating === "I").length / list.length * 100) : null;
+  const trend = { first: pct(rated.slice(0, half)), second: pct(rated.slice(half)), n: rated.length };
+  const counts = { H: 0, P: 0, I: 0, skipped: 0 }; rows.forEach(r => { if (r.rating) counts[r.rating]++; });
+  const goals = data.yps.flatMap(y => (y.content?.terms || []).map((t, i) => `${y.year} Term ${i + 1} (${t.theme}): ${(t.goals || []).join("; ")}`));
+  const facts = [
+    `Weekly plans in this period: ${data.plans.length}. Lessons recorded: ${rows.length} (independent ${counts.I}, prompted ${counts.P}, full help ${counts.H}, skipped ${counts.skipped}).`,
+    trend.n >= 6 ? `Share of lessons done independently: ${trend.first}% in the first half of the period, ${trend.second}% in the second half.` : "",
+    "By learning area:", ...Object.entries(areas).filter(([, x]) => x.lessons || x.ev.length).map(([a, x]) => `- ${a}: ${x.lessons} lessons, about ${Math.round(x.minutes / 60 * 10) / 10} hours (independent ${x.I}, prompted ${x.P}, full help ${x.H}), ${x.ev.length} photos/videos. Example lessons: ${[...new Set(rows.filter(r => r.areas.includes(a)).map(r => r.title))].slice(0, 6).join("; ")}`),
+    goals.length ? "Term goals from the year plan:\n" + goals.map(g => "- " + g).join("\n") : "",
+    "Parent's notes (date, lesson, help level, note):", ...rows.filter(r => r.note).slice(-80).map(r => `- ${r.date}, ${r.title}, ${RL[r.rating] || "not rated"}: ${r.note}`),
+    data.ev.length ? `Photos and videos: ${data.ev.length}, for example: ${data.ev.slice(0, 20).map(e => `${e.taken_on} ${e.lesson_title || ""}`).join("; ")}` : ""
+  ].filter(Boolean).join("\n");
+  return { rows, areas, trend, counts, facts };
+}
+async function reportView(childId, from, to){
+  const c = await db.child(childId); const g = window.SHE_GUIDES?.[c.state] || {};
+  const today = iso(new Date()); const yearAgo = (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); d.setDate(d.getDate() + 1); return iso(d); })();
+  from = from || (c.reg_date && c.reg_date > yearAgo ? c.reg_date : yearAgo); to = to || today;
+  const [data, reps] = await Promise.all([db.reportData(childId, from, to), db.reports(childId)]);
+  const R = compileReport(data, FW[c.state]?.areas || []);
+  const rep = reps.find(r => r.period_start === from && r.period_end === to) || null;
+  const hrs = m => (Math.round(m / 60 * 10) / 10) + " h";
+  const RLB = { H: "Full help", P: "Prompted", I: "Independent", skipped: "Skipped" };
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small noprint"><a href="#/child/${childId}">← ${esc(c.name)}</a></p>
+    <div class="stack" style="gap:6px"><h1>${esc(c.name)}'s progress report</h1><p class="muted">${esc(g.name || c.state)} · ${nice(from)} to ${nice(to)}</p></div>
+    <form class="card row noprint" id="rp" style="align-items:flex-end"><label class="f">From <input type="date" id="rFrom" value="${from}"></label><label class="f">To <input type="date" id="rTo" value="${to}"></label><button class="btn" type="submit">Update</button></form>
+    <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
+      <div class="card" style="padding:14px"><p class="small muted">Lessons recorded</p><p class="big">${R.rows.length}</p></div>
+      <div class="card" style="padding:14px"><p class="small muted">Independent</p><p class="big">${R.counts.I}</p></div>
+      <div class="card" style="padding:14px"><p class="small muted">Prompted</p><p class="big">${R.counts.P}</p></div>
+      <div class="card" style="padding:14px"><p class="small muted">Photos and videos</p><p class="big">${data.ev.length}</p></div>
+    </div>
+    ${R.trend.n >= 6 ? `<p class="banner">Lessons done independently: <b>${R.trend.first}%</b> in the first half of this period, <b>${R.trend.second}%</b> in the second half.</p>` : ""}
+    <section class="card stack"><h2>Written summary</h2>
+      ${rep ? rep.content.sections.map((x, i) => `<div class="stack psec" style="gap:6px"><h3>${esc(x.heading)}</h3><textarea class="noprint" data-i="${i}" rows="6">${esc(x.body)}</textarea><div class="printonly ptext">${esc(x.body)}</div></div>`).join("") + `<div class="row noprint"><button class="btn primary" type="button" id="rSave">Save changes</button></div>`
+        : `<p class="small muted">${R.rows.length ? `We'll write a summary from ${esc(c.name)}'s records for this period: an overview, progress in each learning area, communication and independence, wellbeing and next steps. It only uses what you've recorded.` : "Record how lessons went on your weekly plans, and the summary will be written from those records."}</p>`}
+      ${R.rows.length ? `<div class="row noprint"><button class="btn ${rep ? "" : "primary"}" type="button" id="rWrite">${rep ? "Rewrite the summary" : "Write the summary"}</button><span id="rWait" hidden><span class="spinner"></span> Writing. Usually 1 to 2 minutes.</span></div><p id="rMsg" role="alert" style="color:var(--bad)"></p>` : ""}
+    </section>
+    <section class="card stack"><h2>Learning areas</h2>
+      ${tbl(["Learning area", "Lessons", "Time", "Independent", "Prompted", "Full help", "Photos"], Object.entries(R.areas).filter(([, x]) => x.lessons || x.ev.length).map(([a, x]) => [esc(a), x.lessons, hrs(x.minutes), x.I, x.P, x.H, x.ev.length]))}
+    </section>
+    ${Object.entries(R.areas).filter(([, x]) => x.ev.length).map(([a, x]) => `<section class="card stack evsec"><h2>${esc(a)}: evidence</h2><div class="evgrid">${x.ev.map(e => `<figure>${e.kind === "video" ? `<video src="${esc(e.url)}" controls playsinline preload="metadata"></video>` : `<img src="${esc(e.url)}" alt="${esc(e.lesson_title || "Evidence photo")}" loading="lazy">`}<figcaption class="small"><b>${esc(e.lesson_title || "")}</b><br>${nice(e.taken_on)}${e.kind === "video" ? " · video" : ""}</figcaption></figure>`).join("")}</div></section>`).join("")}
+    <section class="card stack"><h2>Lesson notes</h2>
+      ${tbl(["Date", "Lesson", "How it went", "Note"], R.rows.map(r => [nice(r.date), esc(r.title), esc(RLB[r.rating] || "—"), esc(r.note)]))}
+    </section>
+    <div class="row noprint"><button class="btn primary" type="button" id="rPrint">Print or save as PDF</button></div>
+    <p class="small muted noprint">Tip: when printing, choose "Save as PDF" to email it or upload it with your state's form. Videos show in the app but not in the printed copy.</p>
+  </div>`;
+  $("rp").onsubmit = e => { e.preventDefault(); if ($("rFrom").value && $("rTo").value) reportView(childId, $("rFrom").value, $("rTo").value); };
+  $("rPrint").onclick = () => window.print();
+  if (rep) { view.querySelectorAll("textarea[data-i]").forEach(t => { t.style.height = (t.scrollHeight + 4) + "px"; t.oninput = () => { rep.content.sections[+t.dataset.i].body = t.value; t.nextElementSibling.textContent = t.value; }; });
+    $("rSave").onclick = async () => { try { await db.saveReport(rep.id, rep.content); toast("Saved"); } catch(e){ toast(e.message); } }; }
+  if ($("rWrite")) $("rWrite").onclick = async () => { $("rWrite").disabled = true; $("rWait").hidden = false; $("rMsg").textContent = "";
+    try { await db.writeReport(c, from, to, R.facts); if (rep) await db.deleteReport(rep.id).catch(() => {}); reportView(childId, from, to); }
+    catch(err){ $("rWrite").disabled = false; $("rWait").hidden = true; $("rMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+}
+
 // Rough school terms: Term 1 Feb–Apr, Term 2 May–Jun, Term 3 Jul–Sep, Term 4 Oct–Dec (dates differ by state)
 function termIndex(d){ const m = d.getMonth() + 1; return m <= 4 ? 0 : m <= 6 ? 1 : m <= 9 ? 2 : 3; }
 const TERM_MONTHS = ["about February to April", "about May to June", "about July to September", "about October to December"];
@@ -648,7 +746,7 @@ const APP_HELP = {
   plans: "Your weekly plans in Spectrum Home Ed are your program in action.",
   time: "Spectrum Home Ed tracks learning time by area on every weekly plan.",
   evidence: "Use 📷 Add photo or video and the progress buttons on each lesson. They're saved with dates and learning areas.",
-  report: "Spectrum Home Ed will turn your records and photos into a progress report (coming soon)."
+  report: "Open Progress report on your child's page. It gathers your records, learning time and photos by learning area and drafts a written summary."
 };
 async function guideView(id){
   const c = await db.child(id); const g = window.SHE_GUIDES[c.state];
@@ -865,6 +963,7 @@ async function route(){
   if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/program$/))) return guard(() => programFormView(m[1]));
   if (LIVE && (m = h.match(/^\/program\/([\w-]+)$/))) return guard(() => programView(m[1]));
   if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/year\/(\d{4})$/))) return guard(() => yearView(m[1], +m[2]));
+  if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/report$/))) return guard(() => reportView(m[1]));
   if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));
   if ((m = h.match(/^\/plan\/([\w-]+)$/))) return guard(() => planView(m[1]));
   return guard(homeView);
