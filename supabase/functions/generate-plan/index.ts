@@ -28,6 +28,65 @@ const SUPPORT: Record<string, string> = {
   advanced: "Advanced learner on the spectrum: may be working at or above year level in some areas, needs interest-led depth and social/emotional support. Lessons 20-40 minutes.",
 };
 
+// What each state's written program should contain. Researched from official pages, 28 Oct 2026 (see app/state-guides.js for sources).
+const COMMON_AREAS = "For each learning area: what we'll work on this year at the child's level, example activities linked to their interests, and specific resources.";
+const PROGRAM_DOCS: Record<string, { doc: string; sections: [string, string][] }> = {
+  WA: { doc: "education program", sections: [
+    ["About my child", "Strengths, interests, how they communicate and learn best, current level in literacy and numeracy (general terms)."],
+    ["Goals for this year", "3 to 5 observable goals."],
+    ["Learning areas", `Cover each Western Australian Curriculum learning area. ${COMMON_AREAS}`],
+    ["How learning is adjusted", "Adjustments for sensory, communication and regulation needs; how lessons are kept short and interest-led."],
+    ["Wellbeing, social interaction and physical activity", "Social and emotional support, social interaction and community involvement, physical activity and health."],
+    ["Learning routine and time", "Typical week, recommended learning time, where learning happens."],
+    ["Recording and evaluating progress", "How progress is recorded and reviewed, evidence kept for the moderator."]] },
+  NSW: { doc: "educational program", sections: [
+    ["My child's learning needs", "Strengths, interests, needs and how the program addresses them."],
+    ["Educational program by key learning area", `Based on the NESA syllabuses, adjusted to the child's level. Use the key learning areas for their stage (K-6: English, Mathematics, Science and Technology, HSIE, Creative Arts, PDHPE). ${COMMON_AREAS}`],
+    ["Time allocated to learning", "Weekly schedule and approximate time per key learning area."],
+    ["Recording progress and achievement", "The system for recording progress and achievement."],
+    ["Learning environment and resources", "Where learning happens and resources available."]] },
+  VIC: { doc: "learning plan", sections: [
+    ["Child details", "Name and date of birth (leave a [date of birth] placeholder)."],
+    ["Overview", "Where learning takes place, general schedule, how learning outcomes are recorded, any learning area exemptions being considered."],
+    ["Considering my child's needs", "Optional: a brief, general summary of needs, strengths and supports. No medical information."],
+    ["Learning plan by learning area", `Show how the program substantially addresses all 8 learning areas: English, Mathematics, Humanities and social sciences, Sciences, Health and physical education, The arts, Languages, ICT and design and technology. ${COMMON_AREAS}`]] },
+  QLD: { doc: "educational program summary", sections: [
+    ["My child's needs and background", "Strengths, interests, communication, learning history in general terms."],
+    ["Goals for the year", "3 to 5 goals."],
+    ["Planned learning activities", `${COMMON_AREAS}`],
+    ["How I will track progress", "Records, evidence and review."],
+    ["Learning environment and wellbeing", "How the learning environment supports wellbeing, regulation and social connection."]] },
+  SA: { doc: "12-month learning program", sections: [
+    ["About my child", "Strengths, interests, needs in general terms."],
+    ["Three learning goals", "Exactly 3 goals for the next 12 months, which can combine functional life skills, therapy and academic goals."],
+    ["Learning areas", `All 8 Australian Curriculum learning areas. ${COMMON_AREAS}`],
+    ["Monitoring and assessment", "How progress is monitored and assessed, with literacy and numeracy evidence."],
+    ["Learning environment", "Primarily at home; describe the space and routine."],
+    ["Social interaction", "Planned social interaction, adapted to the child."]] },
+  TAS: { doc: "Home Education Summary and Program (HESP)", sections: [
+    ["Diverse Learning Needs", "The child's learning needs and how the program responds."],
+    ["Research", "How the parent has researched home education approaches and the child's needs."],
+    ["Pedagogy", "The teaching approach and why it suits the child."],
+    ["Literacy", "Literacy plan at the child's level, including communication."],
+    ["Numeracy", "Numeracy plan at the child's level."],
+    ["Range of Learning Areas", `${COMMON_AREAS}`],
+    ["Wellbeing", "Physical, emotional and sensory wellbeing."],
+    ["Interpersonal Skills", "Social and interpersonal skill development."],
+    ["Future Directions", "Only if the child is 13 or over; otherwise write 'Not applicable (under 13)'."],
+    ["Evaluation", "How the program and progress will be evaluated."]] },
+  ACT: { doc: "Statement of Intent draft", sections: [
+    ["About my child", "Strengths, interests, needs."],
+    ["Goals", "3 to 5 goals."],
+    ["Learning program", `By learning area. ${COMMON_AREAS}`],
+    ["Learning environment, routine and social connection", "Where, when, and community activities."],
+    ["Recording and reviewing progress", "How progress is recorded for the yearly report."]] },
+  NT: { doc: "teaching, learning and assessment plan draft", sections: [
+    ["About my child", "Strengths, interests, needs."],
+    ["Teaching and learning by learning area", `${COMMON_AREAS}`],
+    ["Assessment", "How learning will be assessed and recorded."],
+    ["Learning environment and routine", "Where, when and how."]] },
+};
+
 // Recommended weekly learning time (keep in sync with app/planner-data.js). NSW guidance suggests about 15 hours a week for primary.
 const GROUP: Record<string, string> = { "English": "eng", "Mathematics": "math", "Languages": "lang" };
 function recommended(age: number | null, areas: string[]) {
@@ -123,8 +182,9 @@ Deno.serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
-  const { child_id, week_start, focus, extra } = body ?? {};
-  if (!child_id || !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? "")) return json({ error: "Choose a child and a week." }, 400);
+  const { child_id, week_start, focus, extra, kind, answers } = body ?? {};
+  const isProgram = kind === "program";
+  if (!child_id || (!isProgram && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
 
   const { data: child, error: childErr } = await userClient.from("children").select("*").eq("id", child_id).single();
   if (childErr || !child) return json({ error: "Child not found." }, 404);
@@ -223,6 +283,56 @@ ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
     }
     if (lastGood) return lastGood;
     throw new Error("planner failed");
+  }
+
+  // ---------- Registration pack: the written education program each state asks for ----------
+  if (isProgram) {
+    const spec = PROGRAM_DOCS[child.state] ?? PROGRAM_DOCS.WA;
+    const a = (k: string) => String(answers?.[k] ?? "").slice(0, 600);
+    const areaHours = Object.entries(rec.targets).map(([ar, m]) => `${ar} about ${Math.round(Number(m) / 60 * 10) / 10} h`).join("; ");
+    const progPrompt = `${profile}
+
+Write ${child.name}'s ${spec.doc} for home education registration in ${({ WA: "Western Australia", NSW: "New South Wales", VIC: "Victoria", QLD: "Queensland", SA: "South Australia", TAS: "Tasmania", ACT: "the ACT", NT: "the Northern Territory" } as Record<string, string>)[child.state] ?? child.state}, for the year starting ${a("start") || "now"}.
+Regulator: ${fw.regulator}. Learning areas to cover: ${fw.areas.join(", ")}.
+Recommended learning time: about ${Math.round(minutes * 5 / 60)} hours a week (${areaHours}), made up of short focused lessons plus hands-on learning such as cooking, shopping, swimming, gardening and life skills.
+
+Parent's answers:
+- Where learning will mostly happen: ${a("where") || "at home"}
+- Typical week and routine: ${a("routine") || "not stated"}
+- Resources, programs and places they'll use: ${a("resources") || "not stated"}
+- Social and community activities: ${a("social") || "not stated"}
+- Therapies and supports (general): ${a("supports") || "not stated"}
+- Anything else: ${a("other") || "none"}
+
+Write these sections, in this order, using exactly these headings:
+${spec.sections.map((x, i) => `${i + 1}. ${x[0]}: ${x[1]}`).join("\n")}
+
+Rules:
+- Write as the parent, in first person ("I", "we"), in plain Australian English. Short paragraphs and "- " bullet points. No markdown headings, bold or tables inside a section.
+- Pitch goals at ${child.name}'s real level, not their age. Use their interests as the hook.
+- Use respectful, neuro-affirming language. Treat communication (AAC, signs, gestures, scripts) as real communication.
+- Name specific resources and activities, not just "books" or "the internet". Only list resources the parent mentioned or common free Australian ones (library, local pool, ABC Kids, Auslan Signbank).
+- Keep medical detail out: describe needs in general terms only.
+- Don't invent facts about the family. Where something is unknown, write a short line the parent can fill in, in square brackets.
+- Mention that weekly plans, learning time by area, progress records, notes, photos and videos are kept in the Spectrum Home Ed app.`;
+    const progSchema = { type: "object", properties: { sections: { type: "array", minItems: spec.sections.length, items: { type: "object", properties: { heading: { type: "string" }, body: { type: "string" } }, required: ["heading", "body"] } } }, required: ["sections"] };
+    const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start: new Date().toISOString().slice(0, 10) }).select("id").single();
+    if (jobErr || !job) return json({ error: "Couldn't start writing. Please try again." }, 500);
+    const setJob = (f: Record<string, unknown>) => admin.from("plan_jobs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", job.id);
+    const work = async () => {
+      try {
+        const out = obj(await callTool(progPrompt, "save_program", progSchema, 12000, (d) => arr(d?.sections).length >= 3));
+        const sections = arr(out.sections).map(obj).map((x: any) => ({ heading: String(x.heading ?? "").slice(0, 120), body: String(x.body ?? "").slice(0, 6000) })).filter((x: any) => x.heading && x.body);
+        if (!sections.length) { await setJob({ status: "failed", error: "The program came back empty. Please try again." }); return; }
+        await admin.from("generations").insert({ parent_id: user!.id });
+        const { data: saved, error } = await admin.from("programs").insert({ parent_id: user!.id, child_id, state: child.state, title: `${child.name}'s ${spec.doc}`, content: { doc_name: spec.doc, sections, answers } }).select("id").single();
+        if (error || !saved) { console.error("Program save failed", error); await setJob({ status: "failed", error: "Couldn't save the program. Please try again." }); return; }
+        await setJob({ status: "done", program_id: saved.id, progress: 5 });
+      } catch (e) { console.error("Program failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
+    };
+    // @ts-ignore EdgeRuntime is provided by Supabase
+    EdgeRuntime.waitUntil(work());
+    return json({ job_id: job.id }, 202);
   }
 
   const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];

@@ -85,6 +85,10 @@ textarea{min-height:72px;resize:vertical}
 .hpi{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ev{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
 .reqcard{text-decoration:none;color:inherit}
+.psec textarea{width:100%;font:16px/1.55 var(--body);padding:12px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);resize:vertical;min-height:120px}
+.ptext{white-space:pre-wrap}
+.printonly{display:none}
+@media print{.printonly{display:block}.psec{break-inside:avoid-page;border:0;padding:0}}
 .dues{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .due{padding:8px 10px;border-radius:10px;background:var(--bg);border-left:4px solid var(--line)}
 .due.soon{border-left-color:#d99a2b}
@@ -212,17 +216,29 @@ if (LIVE) {
       if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
       if (r.data?.plan) return r.data.plan;
       const jobId = r.data?.job_id; if (!jobId) throw new Error("The planner didn't start. Please try again.");
-      // The plan is written in the background. Check every few seconds for up to 8 minutes.
+      const j = await this.waitJob(jobId, onProgress); return { id: j.plan_id };
+    },
+    // Plans and programs are written in the background. Check every few seconds for up to 8 minutes.
+    async waitJob(jobId, onProgress){
       for (let i = 0; i < 120; i++) {
         await new Promise(res => setTimeout(res, 4000));
-        const { data: j } = await sb.from("plan_jobs").select("status,progress,plan_id,error").eq("id", jobId).maybeSingle();
+        const { data: j } = await sb.from("plan_jobs").select("status,progress,plan_id,program_id,error").eq("id", jobId).maybeSingle();
         if (!j) continue;
         if (typeof onProgress === "function") onProgress(j.progress || 0);
-        if (j.status === "done" && j.plan_id) return { id: j.plan_id };
-        if (j.status === "failed") throw new Error(j.error || "The planner had a problem. Please try again.");
+        if (j.status === "done" && (j.plan_id || j.program_id)) return j;
+        if (j.status === "failed") throw new Error(j.error || "The writer had a problem. Please try again.");
       }
-      throw new Error("This is taking longer than usual. Check the Plans list below in a few minutes.");
+      throw new Error("This is taking longer than usual. Check back in a few minutes; it will appear when it's ready.");
     },
+    async writeProgram(child, answers){
+      const r = await sb.functions.invoke("generate-plan", { body:{ kind: "program", child_id: child.id, answers } });
+      if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
+      const j = await this.waitJob(r.data.job_id); return { id: j.program_id };
+    },
+    async programs(childId){ return must(await sb.from("programs").select("id,title,state,created_at,updated_at").eq("child_id", childId).order("created_at", { ascending:false })); },
+    async program(id){ return must(await sb.from("programs").select("*").eq("id", id).single()); },
+    async saveProgram(id, content){ return must(await sb.from("programs").update({ content, updated_at: new Date().toISOString() }).eq("id", id).select().single()); },
+    async deleteProgram(id){ must(await sb.from("programs").delete().eq("id", id)); },
     async generateTemplate(child, week, focus){
       const content = window.SHE_demoPlan(child, week, focus);
       return must(await sb.from("plans").insert({ child_id: child.id, week_start: week, title: content.title, content, source: "demo" }).select().single());
@@ -261,6 +277,7 @@ if (LIVE) {
     async plan(id){ const p = load().plans.find(x => x.id === id); if (!p) throw new Error("Plan not found"); return p; },
     async savePlanContent(id, content){ const d = load(); const p = d.plans.find(x => x.id === id); p.content = content; p.title = content.title; save(d); return p; },
     async evidence(){ return []; },
+    async programs(){ return []; },
     async deletePlan(id){ const d = load(); d.plans = d.plans.filter(x => x.id !== id); d.logs = d.logs.filter(l => l.plan_id !== id); save(d); },
     async logs(planId){ return load().logs.filter(l => l.plan_id === planId); },
     async log(planId, key, rating, note){ const d = load(); let l = d.logs.find(x => x.plan_id === planId && x.lesson_key === key); if (!l) { l = { id: uuid(), plan_id: planId, lesson_key: key }; d.logs.push(l); } l.rating = rating; l.note = note; save(d); return l; },
@@ -404,7 +421,7 @@ async function childFormView(id){
 }
 
 async function childView(id){
-  const [c, plans] = await Promise.all([db.child(id), db.plans(id)]);
+  const [c, plans, progs] = await Promise.all([db.child(id), db.plans(id), db.programs(id)]);
   const fw = FW[c.state] || FW.WA;
   const wk = iso(mondayOf(new Date()));
   view.innerHTML = `<div class="stack">${banner()}
@@ -416,6 +433,10 @@ async function childView(id){
         <div class="progress"><i style="width:${pr.total ? Math.round(pr.done / pr.total * 100) : 0}%"></i></div>
         ${dl.length ? `<ul class="dues">${dl.map(dueRow).join("")}</ul>` : `<p class="small muted">${c.reg_date ? "No deadlines coming up." : "Add your registration date in the guide to see your deadlines."}</p>`}
         <span class="small" style="color:var(--accent);font-weight:700">Open the step-by-step guide →</span></a>`; })()}
+    ${LIVE && window.SHE_GUIDES?.[c.state] ? `<div class="card stack"><div class="row" style="justify-content:space-between"><h2>Registration pack</h2></div>
+      <p class="small muted">The written ${esc(PACK_NAME[c.state] || "education program")} ${esc(window.SHE_GUIDES[c.state].name)} asks for, drafted from ${esc(c.name)}'s profile. You check and edit it before sending.</p>
+      ${progs.length ? `<div class="plans">${progs.map(p => `<a class="planrow" href="#/program/${p.id}"><span><b>${esc(p.title || "Program")}</b><br><span class="muted small">Written ${nice(p.created_at.slice(0,10))}${p.updated_at && p.updated_at.slice(0,10) !== p.created_at.slice(0,10) ? ` · edited ${nice(p.updated_at.slice(0,10))}` : ""}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : ""}
+      <div><a class="btn ${progs.length ? "quiet" : "primary"}" href="#/child/${id}/program">${progs.length ? "Write a new version" : `Write ${esc(c.name)}'s ${esc(PACK_NAME[c.state] || "program")}`}</a></div></div>` : ""}
     <form class="card stack" id="genForm">
       <h2>Plan a week</h2>
       <div class="grid2">
@@ -510,8 +531,61 @@ async function planView(id, dayIdx = 0){
   $("pDel").onclick = () => { $("pDelArea").innerHTML = `<span class="confirm">Delete this plan, its records, and its photos and videos?<button class="btn danger small" type="button" id="pdy">Delete</button><button class="btn quiet small" type="button" id="pdn">Keep</button></span>`; $("pdn").onclick = () => planView(id, dayIdx); $("pdy").onclick = async () => { await db.deletePlan(id); toast("Plan deleted"); location.hash = `#/child/${p.child_id}`; }; };
 }
 
+const PACK_NAME = { WA: "education program", NSW: "educational program", VIC: "learning plan", QLD: "educational program summary", SA: "12-month learning program", TAS: "Home Education Summary and Program (HESP)", ACT: "Statement of Intent draft", NT: "teaching, learning and assessment plan draft" };
+const PACK_TIP = {
+  VIC: "The VRQA has optional Word templates for learning plans. You can paste these sections into a template or send this as your own plan.",
+  QLD: "Queensland Home Education has optional templates. You can paste these sections into a template or attach this as your summary.",
+  NT: "The NT asks you to use its teaching, learning and assessment plan for your child's year level. Paste these sections into that form.",
+  ACT: "Check the ACT Home Education team's current Statement of Intent form, and paste these sections into it.",
+  TAS: "Each heading matches one of the Registrar's standards. Keep the headings bold when you paste it into your HESP."
+};
+async function programFormView(childId){
+  const c = await db.child(childId); const g = window.SHE_GUIDES[c.state] || {};
+  const q = (k, label, hint, ph) => `<label class="f">${label} ${hint ? `<small>${hint}</small>` : ""}<textarea id="q_${k}" maxlength="600" rows="2" placeholder="${esc(ph || "")}"></textarea></label>`;
+  view.innerHTML = `<form class="stack" id="pf">${banner()}
+    <p class="small"><a href="#/child/${childId}">← ${esc(c.name)}</a></p>
+    <h1>${esc(c.name)}'s ${esc(PACK_NAME[c.state] || "program")}</h1>
+    <p class="muted">Answer what you can. Short answers are fine, and anything you skip is left as a [placeholder] you can fill in later. We already know ${esc(c.name)}'s interests, support level and goals from their profile.</p>
+    <div class="card stack">
+      <label class="f">Starting <small>The year or date this program covers</small><input type="text" id="q_start" maxlength="40" value="${new Date().getMonth() >= 9 ? new Date().getFullYear() + 1 : new Date().getFullYear()}"></label>
+      ${q("where", "Where will learning mostly happen?", "", "At home, plus outings to the pool, library and shops")}
+      ${q("routine", "What does a typical week look like?", "Rough times are fine", "Mornings for focused learning, afternoons for outings and hands-on activities")}
+      ${q("resources", "Resources, programs and places you'll use", "Name them if you can: apps, books, programs, places", "")}
+      ${q("social", "Social and community activities", "", "Swimming lessons, playgroup, visiting grandparents, church")}
+      ${q("supports", "Therapies and supports", "General terms only, no medical details needed", "Speech therapy fortnightly, OT through NDIS")}
+      ${q("other", "Anything else the department should know?", "Optional", "")}
+    </div>
+    <p id="pfMsg" role="alert" style="color:var(--bad)"></p>
+    <div class="row"><button class="btn primary" type="submit" id="pfGo">Write it</button><span id="pfWait" hidden><span class="spinner"></span> Writing. This usually takes 1 to 3 minutes. Keep this page open.</span></div>
+  </form>`;
+  $("pf").onsubmit = async e => { e.preventDefault(); const answers = {}; ["start","where","routine","resources","social","supports","other"].forEach(k => answers[k] = $("q_" + k).value.trim());
+    $("pfGo").disabled = true; $("pfWait").hidden = false; $("pfMsg").textContent = "";
+    try { const p = await db.writeProgram(c, answers); location.hash = `#/program/${p.id}`; }
+    catch(err){ $("pfGo").disabled = false; $("pfWait").hidden = true;
+      $("pfMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+}
+async function programView(id){
+  const p = await db.program(id); const c = await db.child(p.child_id).catch(() => ({ name: "", state: p.state })); const ct = p.content || { sections: [] };
+  const g = window.SHE_GUIDES[p.state] || {};
+  const asText = () => `${p.title}\n\n` + ct.sections.map(x => `${x.heading.toUpperCase()}\n${x.body}`).join("\n\n");
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small noprint"><a href="#/child/${p.child_id}">← ${esc(c.name)}</a></p>
+    <div class="stack" style="gap:6px"><h1>${esc(p.title)}</h1><p class="muted">${esc(g.name || p.state)} · written ${nice(p.created_at.slice(0,10))}</p></div>
+    <p class="banner noprint">This is a draft. Read it through, fix anything that isn't right, and fill in any [square brackets] before you send it. ${esc(PACK_TIP[p.state] || "")}</p>
+    ${ct.sections.map((x, i) => `<section class="card stack psec"><h2>${esc(x.heading)}</h2><textarea class="noprint" data-i="${i}" rows="8">${esc(x.body)}</textarea><div class="printonly ptext">${esc(x.body)}</div></section>`).join("")}
+    <div class="row noprint"><button class="btn primary" type="button" id="pgSave">Save changes</button><button class="btn" type="button" id="pgCopy">Copy all text</button><button class="btn" type="button" id="pgPrint">Print or save as PDF</button><span id="pgDelArea"><button class="btn danger" type="button" id="pgDel">Delete</button></span></div>
+    <p class="small muted noprint">To send it: print to PDF, or copy the text into your state's form. <a href="#/child/${p.child_id}/guide">Back to the ${esc(g.name || "")} guide</a></p>
+  </div>`;
+  const grow = t => { t.style.height = "auto"; t.style.height = (t.scrollHeight + 4) + "px"; };
+  view.querySelectorAll("textarea[data-i]").forEach(t => { grow(t); t.oninput = () => { grow(t); ct.sections[+t.dataset.i].body = t.value; t.nextElementSibling.textContent = t.value; }; });
+  $("pgSave").onclick = async () => { try { await db.saveProgram(id, ct); toast("Saved"); } catch(e){ toast(e.message); } };
+  $("pgCopy").onclick = () => navigator.clipboard.writeText(asText()).then(() => toast("Copied. Paste it into your form or a document.")).catch(() => toast("Copy isn't allowed here. Try Print instead."));
+  $("pgPrint").onclick = () => window.print();
+  $("pgDel").onclick = () => { $("pgDelArea").innerHTML = `<span class="confirm">Delete this draft?<button class="btn danger small" type="button" id="pgy">Delete</button><button class="btn quiet small" type="button" id="pgn">Keep</button></span>`; $("pgn").onclick = () => programView(id); $("pgy").onclick = async () => { await db.deleteProgram(id); toast("Deleted"); location.hash = `#/child/${p.child_id}`; }; };
+}
+
 const APP_HELP = {
-  pack: "Spectrum Home Ed will write this for you from your child's profile (registration pack, coming next).",
+  pack: "Spectrum Home Ed drafts this for you from your child's profile. Open Registration pack on your child's page.",
   plans: "Your weekly plans in Spectrum Home Ed are your program in action.",
   time: "Spectrum Home Ed tracks learning time by area on every weekly plan.",
   evidence: "Use 📷 Add photo or video and the progress buttons on each lesson. They're saved with dates and learning areas.",
@@ -729,6 +803,8 @@ async function route(){
   if (h === "/child/new") return guard(() => childFormView());
   if ((m = h.match(/^\/child\/([\w-]+)\/edit$/))) return guard(() => childFormView(m[1]));
   if ((m = h.match(/^\/child\/([\w-]+)\/guide$/))) return guard(() => guideView(m[1]));
+  if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/program$/))) return guard(() => programFormView(m[1]));
+  if (LIVE && (m = h.match(/^\/program\/([\w-]+)$/))) return guard(() => programView(m[1]));
   if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));
   if ((m = h.match(/^\/plan\/([\w-]+)$/))) return guard(() => planView(m[1]));
   return guard(homeView);
