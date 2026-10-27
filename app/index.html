@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Spectrum Home Ed: Family app</title>
+<link rel="icon" href="../icon.png">
+<link rel="apple-touch-icon" href="../icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Baloo+2:wght@600;800&display=swap">
+<style>
+:root{
+  --bg:#f5f7f6;--surface:#fff;--ink:#16323a;--muted:#4e6870;--line:#d6e0df;--accent:#1f7a8c;--accent-ink:#fff;
+  --good:#2f7d4f;--warn:#a86b00;--bad:#b3263e;
+  --a1:#f2a65a;--a2:#e7c95b;--a3:#7cc49a;--a4:#5fb3c9;--a5:#7f8fd6;--a6:#c487c9;
+  --tint:#e7f2f4;--h:#fbe1e6;--p:#fbf4d6;--i:#e3f3e9;
+  --display:"Baloo 2","Trebuchet MS",system-ui,sans-serif;--body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1c20;--surface:#162a30;--ink:#e6f0f0;--muted:#a3babd;--line:#28414a;--accent:#5cc3d6;--accent-ink:#0f1c20;--tint:#183139;--h:#3a1f27;--p:#363017;--i:#1b3326;--good:#7fd6a2;--warn:#f2c46a;--bad:#f0788c;color-scheme:dark}}
+*{box-sizing:border-box}
+html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.5}
+a{color:var(--accent)}
+h1,h2,h3{font-family:var(--display);line-height:1.15;margin:0;text-wrap:balance}
+h1{font-size:clamp(28px,5vw,38px)}h2{font-size:24px}h3{font-size:19px}
+p{margin:0}
+[hidden]{display:none!important}
+.wrap{max-width:960px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:10px}
+.brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--ink);font-family:var(--display);font-weight:800;font-size:20px}
+.bars{display:flex;gap:2px;height:20px;align-items:flex-end}.bars i{display:block;width:4px;border-radius:2px}
+.navr{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--muted);min-width:0}
+.navr span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40vw}
+main{padding-block:24px 64px}
+.stack{display:flex;flex-direction:column;gap:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}
+.small{font-size:14px}
+.banner{background:var(--p);border-radius:12px;padding:10px 14px;font-size:15px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:12px;font:700 16px var(--body);border:2px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;text-decoration:none}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.quiet{border-color:var(--line);color:var(--ink)}
+.btn.danger{border-color:var(--line);color:var(--bad)}
+.btn.small{padding:6px 10px;font-size:14px;border-radius:10px}
+.btn:disabled{opacity:.5;cursor:default}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+label.f{display:flex;flex-direction:column;gap:6px;font-weight:700}
+label.f small{font-weight:400;color:var(--muted)}
+input[type=text],input[type=email],input[type=password],input[type=number],input[type=date],select,textarea{font:400 16px var(--body);padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);width:100%}
+textarea{min-height:72px;resize:vertical}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:640px){.grid2{grid-template-columns:1fr}}
+.kids{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.kid{display:flex;flex-direction:column;gap:10px;text-decoration:none;color:var(--ink)}
+.kid:hover{border-color:var(--accent)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--tint);color:var(--ink)}
+.chip.x{display:inline-flex;gap:6px;align-items:center}
+.chip.x button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;padding:0}
+.levels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (max-width:520px){.levels{grid-template-columns:1fr}}
+.level{border:2px solid var(--line);border-radius:14px;padding:12px;cursor:pointer;display:flex;gap:10px;align-items:flex-start}
+.level:has(input:checked){border-color:var(--accent);background:var(--tint)}
+.level b{display:block}
+.level span{font-size:14px;color:var(--muted)}
+.plans{display:flex;flex-direction:column;gap:8px}
+.planrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;text-decoration:none;color:var(--ink);background:var(--surface)}
+.planrow:hover{border-color:var(--accent)}
+.cover{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.area{border-radius:12px;padding:8px 10px;border:1px solid var(--line);font-size:14px;display:flex;justify-content:space-between;gap:6px}
+.area.ok{background:var(--i)}.area.miss{background:var(--h)}
+.area b{font-variant-numeric:tabular-nums}
+.daytabs{display:flex;gap:6px;flex-wrap:wrap}
+.daytabs button{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:8px 14px;font:700 15px var(--body);cursor:pointer}
+.daytabs button[aria-pressed=true]{border-color:var(--accent);background:var(--tint)}
+.lesson{display:flex;flex-direction:column;gap:10px}
+.lesson dl{display:grid;grid-template-columns:130px 1fr;gap:6px 14px;margin:0;font-size:16px}
+.lesson dt{font-weight:700;color:var(--muted)}
+.lesson dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.lesson ol{margin:0;padding-left:20px}
+@media (max-width:560px){.lesson dl{grid-template-columns:1fr}.lesson dt{margin-top:6px}}
+.hpi{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.hpi button{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:6px 10px;font:700 14px var(--body);cursor:pointer}
+.hpi button[aria-pressed=true][data-r=H]{background:var(--h);border-color:var(--bad)}
+.hpi button[aria-pressed=true][data-r=P]{background:var(--p);border-color:var(--warn)}
+.hpi button[aria-pressed=true][data-r=I]{background:var(--i);border-color:var(--good)}
+.hpi button[aria-pressed=true][data-r=skipped]{background:var(--line)}
+.progress{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.progress i{display:block;height:100%;background:var(--accent)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:700;z-index:20;max-width:90vw}
+.spinner{width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;display:inline-block;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.confirm{background:var(--h);border-radius:12px;padding:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-weight:700}
+.authbox{max-width:440px;margin:0 auto}
+.empty{text-align:center;padding:32px 16px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+@media print{
+  header.top,.noprint,.hpi,.daytabs,.btn{display:none!important}
+  body{background:#fff;color:#000;font-size:12pt}
+  .card{border:1px solid #999;break-inside:avoid}
+  .day[hidden]{display:block!important}
+}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap nav">
+  <a class="brand" href="../"><span class="bars" aria-hidden="true"><i style="height:9px;background:var(--a1)"></i><i style="height:13px;background:var(--a2)"></i><i style="height:17px;background:var(--a3)"></i><i style="height:20px;background:var(--a4)"></i><i style="height:17px;background:var(--a5)"></i><i style="height:13px;background:var(--a6)"></i></span>Spectrum Home Ed</a>
+  <div class="navr" id="acct" hidden><span id="acctEmail"></span><button class="btn quiet small" id="signOut">Sign out</button></div>
+</div></header>
+<main><div class="wrap" id="view" aria-live="polite"></div></main>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="planner-data.js"></script>
+<script>
+(() => {
+const C = window.SHE_CONFIG || {};
+const LIVE = !!(C.supabaseUrl && C.supabaseAnonKey && window.supabase);
+const FW = window.SHE_FRAMEWORKS, SUP = window.SHE_SUPPORT;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const view = $("view");
+let tt; function toast(m){const t=$("toast");t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,3000)}
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random().toString(16).slice(2));
+
+/* ---------- data layer ---------- */
+let db, user = null;
+if (LIVE) {
+  const sb = window.supabase.createClient(C.supabaseUrl, C.supabaseAnonKey);
+  const must = r => { if (r.error) throw new Error(r.error.message); return r.data; };
+  db = {
+    sb,
+    async session(){ const { data } = await sb.auth.getSession(); return data.session?.user || null; },
+    async signUp(email, password){ const r = await sb.auth.signUp({ email, password, options:{ emailRedirectTo: location.origin + location.pathname } }); if (r.error) throw r.error; return r.data; },
+    async signIn(email, password){ const r = await sb.auth.signInWithPassword({ email, password }); if (r.error) throw r.error; return r.data.user; },
+    async reset(email){ const r = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }); if (r.error) throw r.error; },
+    async newPassword(password){ const r = await sb.auth.updateUser({ password }); if (r.error) throw r.error; },
+    async signOut(){ await sb.auth.signOut(); },
+    async children(){ return must(await sb.from("children").select("*").order("created_at")); },
+    async child(id){ return must(await sb.from("children").select("*").eq("id", id).single()); },
+    async saveChild(c){ const { id, ...rest } = c; return id ? must(await sb.from("children").update(rest).eq("id", id).select().single()) : must(await sb.from("children").insert(rest).select().single()); },
+    async deleteChild(id){ must(await sb.from("children").delete().eq("id", id)); },
+    async plans(childId){ return must(await sb.from("plans").select("id,child_id,week_start,title,source,created_at").eq("child_id", childId).order("week_start", { ascending:false })); },
+    async plan(id){ return must(await sb.from("plans").select("*").eq("id", id).single()); },
+    async savePlanContent(id, content){ return must(await sb.from("plans").update({ content, title: content.title }).eq("id", id).select().single()); },
+    async deletePlan(id){ must(await sb.from("plans").delete().eq("id", id)); },
+    async logs(planId){ return must(await sb.from("lesson_logs").select("*").eq("plan_id", planId)); },
+    async log(planId, key, rating, note){ return must(await sb.from("lesson_logs").upsert({ plan_id: planId, lesson_key: key, rating, note }, { onConflict:"plan_id,lesson_key" }).select().single()); },
+    async generate(child, week, focus, extra){
+      const r = await sb.functions.invoke("generate-plan", { body:{ child_id: child.id, week_start: week, focus, extra } });
+      if (r.error) { let msg = r.error.message; try { const b = await r.error.context.json(); if (b.error) msg = b.error; } catch(e){} throw new Error(msg); }
+      return r.data.plan;
+    }
+  };
+  sb.auth.onAuthStateChange((ev, s) => {
+    if (ev === "PASSWORD_RECOVERY") { location.hash = "#/new-password"; }
+    if (ev === "SIGNED_OUT") { user = null; route(); }
+    if (ev === "SIGNED_IN" && /access_token/.test(location.hash)) { user = s?.user || null; history.replaceState(null, "", location.pathname + "#/"); route(); }
+  });
+} else {
+  const KEY = "she-demo-v1";
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || { children:[], plans:[], logs:[] }; } catch(e){ return { children:[], plans:[], logs:[] }; } };
+  const save = d => { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){ toast("Couldn't save on this device"); } };
+  db = {
+    async session(){ return { email: "demo@spectrumhomeed.com" }; },
+    async signOut(){},
+    async children(){ return load().children; },
+    async child(id){ const c = load().children.find(x => x.id === id); if (!c) throw new Error("Child not found"); return c; },
+    async saveChild(c){ const d = load(); if (c.id) { d.children = d.children.map(x => x.id === c.id ? { ...x, ...c } : x); } else { c = { ...c, id: uuid(), created_at: new Date().toISOString() }; d.children.push(c); } save(d); return d.children.find(x => x.id === c.id); },
+    async deleteChild(id){ const d = load(); const pids = d.plans.filter(p => p.child_id === id).map(p => p.id); d.children = d.children.filter(x => x.id !== id); d.plans = d.plans.filter(p => p.child_id !== id); d.logs = d.logs.filter(l => !pids.includes(l.plan_id)); save(d); },
+    async plans(childId){ return load().plans.filter(p => p.child_id === childId).sort((a,b) => b.week_start.localeCompare(a.week_start)); },
+    async plan(id){ const p = load().plans.find(x => x.id === id); if (!p) throw new Error("Plan not found"); return p; },
+    async savePlanContent(id, content){ const d = load(); const p = d.plans.find(x => x.id === id); p.content = content; p.title = content.title; save(d); return p; },
+    async deletePlan(id){ const d = load(); d.plans = d.plans.filter(x => x.id !== id); d.logs = d.logs.filter(l => l.plan_id !== id); save(d); },
+    async logs(planId){ return load().logs.filter(l => l.plan_id === planId); },
+    async log(planId, key, rating, note){ const d = load(); let l = d.logs.find(x => x.plan_id === planId && x.lesson_key === key); if (!l) { l = { id: uuid(), plan_id: planId, lesson_key: key }; d.logs.push(l); } l.rating = rating; l.note = note; save(d); return l; },
+    async generate(child, week, focus){ await new Promise(r => setTimeout(r, 900)); const content = window.SHE_demoPlan(child, week, focus); const d = load(); const p = { id: uuid(), child_id: child.id, week_start: week, title: content.title, content, source: "demo", created_at: new Date().toISOString() }; d.plans.push(p); save(d); return p; }
+  };
+}
+
+/* ---------- helpers ---------- */
+const age = y => y ? (new Date().getFullYear() - y) : null;
+function mondayOf(dt){ const d = new Date(dt); const day = d.getDay(); const diff = day === 0 ? 1 : (day === 1 ? 0 : 8 - day); d.setDate(d.getDate() + diff); return d; }
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const nice = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d).toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" }); };
+function coverage(content){ const areas = content.areas || []; const n = Object.fromEntries(areas.map(a => [a, 0])); (content.days||[]).forEach(d => (d.lessons||[]).forEach(l => (l.areas||[]).forEach(a => { if (a in n) n[a]++; }))); return n; }
+const banner = () => LIVE ? "" : `<p class="banner noprint"><b>Demo mode.</b> Everything is saved on this device only, and plans come from a built-in template. Accounts and the AI planner switch on once the app is connected.</p>`;
+async function guard(fn){ try { await fn(); } catch(e){ console.error(e); view.innerHTML = `<div class="card stack"><h2>Something went wrong</h2><p>${esc(e.message)}</p><p><a class="btn" href="#/">Back to your family</a></p></div>`; } }
+
+/* ---------- views ---------- */
+function authView(mode = "in"){
+  view.innerHTML = `<div class="authbox stack">
+    <div class="stack" style="gap:8px"><h1>${mode === "up" ? "Create your family account" : mode === "reset" ? "Reset your password" : "Welcome back"}</h1>
+    <p class="muted">${mode === "up" ? "Free to start. Set up a profile for each child and get a personalised weekly plan." : mode === "reset" ? "We'll email you a link to set a new password." : "Sign in to see your children's plans."}</p></div>
+    <form class="card stack" id="authForm" novalidate>
+      <label class="f">Email <input type="email" id="aEmail" autocomplete="email" required></label>
+      ${mode !== "reset" ? `<label class="f">Password <small>At least 8 characters</small><input type="password" id="aPass" autocomplete="${mode === "up" ? "new-password" : "current-password"}" minlength="8" required></label>` : ""}
+      <p class="small" id="aMsg" role="alert"></p>
+      <button class="btn primary" type="submit" id="aGo">${mode === "up" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}</button>
+    </form>
+    <p class="row small">${mode === "in" ? `<a href="#/signup">Create an account</a> · <a href="#/reset">Forgot password?</a>` : `<a href="#/signin">I already have an account</a>`}</p>
+  </div>`;
+  $("authForm").onsubmit = async e => {
+    e.preventDefault();
+    const email = $("aEmail").value.trim(), pass = $("aPass")?.value || "";
+    const msg = $("aMsg"); msg.textContent = ""; msg.style.color = "var(--bad)";
+    if (!/^\S+@\S+\.\S+$/.test(email)) { msg.textContent = "Enter a valid email address."; return; }
+    if (mode !== "reset" && pass.length < 8) { msg.textContent = "Passwords need at least 8 characters."; return; }
+    $("aGo").disabled = true;
+    try {
+      if (mode === "up") { const r = await db.signUp(email, pass); if (r.session) { user = r.user; location.hash = "#/child/new"; route(); } else { msg.style.color = "var(--good)"; msg.textContent = "Check your email and tap the link to confirm your account, then sign in."; } }
+      else if (mode === "reset") { await db.reset(email); msg.style.color = "var(--good)"; msg.textContent = "If that email has an account, a reset link is on its way."; }
+      else { user = await db.signIn(email, pass); location.hash = "#/"; route(); }
+    } catch(err) { msg.textContent = err.message === "Invalid login credentials" ? "That email and password don't match. Try again or reset your password." : err.message; }
+    $("aGo").disabled = false;
+  };
+}
+
+function newPasswordView(){
+  view.innerHTML = `<div class="authbox stack"><h1>Set a new password</h1><form class="card stack" id="npForm"><label class="f">New password <small>At least 8 characters</small><input type="password" id="npPass" minlength="8" autocomplete="new-password" required></label><p class="small" id="npMsg" role="alert" style="color:var(--bad)"></p><button class="btn primary" type="submit">Save password</button></form></div>`;
+  $("npForm").onsubmit = async e => { e.preventDefault(); const p = $("npPass").value; if (p.length < 8) { $("npMsg").textContent = "Passwords need at least 8 characters."; return; } try { await db.newPassword(p); toast("Password saved"); location.hash = "#/"; } catch(err){ $("npMsg").textContent = err.message; } };
+}
+
+async function homeView(){
+  const kids = await db.children();
+  view.innerHTML = `<div class="stack">${banner()}
+    <div class="row" style="justify-content:space-between"><h1>Your family</h1><a class="btn primary" href="#/child/new">Add a child</a></div>
+    ${kids.length ? `<div class="kids">${kids.map(k => `<a class="card kid" href="#/child/${k.id}">
+        <div class="row" style="justify-content:space-between"><h2>${esc(k.name)}</h2><span class="chip">${esc(k.state)}</span></div>
+        <p class="muted small">${age(k.birth_year) ? `Age ${age(k.birth_year)} · ` : ""}${esc(SUP[k.support_level]?.label || "")}</p>
+        <div class="chips">${(k.interests||[]).slice(0,5).map(i => `<span class="chip">${esc(i)}</span>`).join("")}</div>
+        <span class="small" style="color:var(--accent);font-weight:700">Open plans →</span></a>`).join("")}</div>`
+      : `<div class="card empty stack"><h2>Start with your child</h2><p>Tell us what your child loves and how they communicate, and we'll build their first week of lessons around it.</p><p><a class="btn primary" href="#/child/new">Add your first child</a></p></div>`}
+  </div>`;
+}
+
+async function childFormView(id){
+  const c = id ? await db.child(id) : { name:"", birth_year:"", state:"WA", support_level:"high", communication:"", interests:[], sensory_notes:"", goals:"", minutes_per_day:60 };
+  let interests = [...(c.interests || [])];
+  view.innerHTML = `<form class="stack" id="cForm" novalidate>${banner()}
+    <h1>${id ? `Edit ${esc(c.name)}'s profile` : "Add a child"}</h1>
+    <div class="card stack">
+      <div class="grid2">
+        <label class="f">First name or nickname <input type="text" id="cName" value="${esc(c.name)}" maxlength="40" required></label>
+        <label class="f">Year of birth <input type="number" id="cYear" value="${esc(c.birth_year || "")}" min="1990" max="${new Date().getFullYear()}" inputmode="numeric"></label>
+      </div>
+      <label class="f">State or territory <small>Plans follow your state's curriculum framework</small>
+        <select id="cState">${Object.entries(FW).map(([k,v]) => `<option value="${k}" ${c.state === k ? "selected" : ""}>${v.label}</option>`).join("")}</select></label>
+    </div>
+    <div class="card stack"><h3>Support level</h3><p class="muted small">Pick the closest. You can change it any time.</p>
+      <div class="levels">${Object.entries(SUP).map(([k,v]) => `<label class="level"><input type="radio" name="lvl" value="${k}" ${c.support_level === k ? "checked" : ""}><span><b>${v.label}</b><span>${v.blurb}</span></span></label>`).join("")}</div>
+    </div>
+    <div class="card stack">
+      <label class="f">How do they communicate? <small>e.g. nonverbal, uses an AAC app, gestalt scripts from ads and shows, a few signs, talks in sentences</small><input type="text" id="cComm" value="${esc(c.communication || "")}" maxlength="200"></label>
+      <div class="stack" style="gap:8px"><label class="f" for="cInt">Favourite things <small>Shows, songs, jingles, places, games, toys. Press Enter after each one.</small></label>
+        <div class="chips" id="intChips"></div>
+        <div class="row"><input type="text" id="cInt" maxlength="60" style="flex:1;min-width:0" placeholder="e.g. game shows"><button class="btn quiet small" type="button" id="intAdd">Add</button></div></div>
+      <label class="f">Sensory notes <small>What helps them feel calm, and what overwhelms them</small><textarea id="cSens" maxlength="500">${esc(c.sensory_notes || "")}</textarea></label>
+      <label class="f">Your goals <small>What matters most right now, including therapy goals</small><textarea id="cGoals" maxlength="500">${esc(c.goals || "")}</textarea></label>
+      <label class="f">Structured learning time per day: <span id="minOut">${c.minutes_per_day}</span> minutes <input type="range" id="cMin" min="15" max="240" step="15" value="${c.minutes_per_day}"></label>
+    </div>
+    <p id="cMsg" role="alert" style="color:var(--bad)"></p>
+    <div class="row"><button class="btn primary" type="submit">${id ? "Save changes" : "Save profile"}</button><a class="btn quiet" href="${id ? `#/child/${id}` : "#/"}">Cancel</a></div>
+    ${id ? `<div id="delArea" class="noprint"><button class="btn danger" type="button" id="cDel">Delete ${esc(c.name)}'s profile</button></div>` : ""}
+  </form>`;
+  const drawChips = () => { $("intChips").innerHTML = interests.map((t,i) => `<span class="chip x">${esc(t)}<button type="button" aria-label="Remove ${esc(t)}" data-i="${i}">×</button></span>`).join("") || `<span class="muted small">None yet</span>`; };
+  const addInt = () => { const v = $("cInt").value.trim(); if (v && !interests.includes(v) && interests.length < 15) interests.push(v); $("cInt").value = ""; drawChips(); };
+  drawChips();
+  $("intChips").onclick = e => { if (e.target.dataset.i) { interests.splice(+e.target.dataset.i, 1); drawChips(); } };
+  $("intAdd").onclick = addInt;
+  $("cInt").onkeydown = e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addInt(); } };
+  $("cMin").oninput = e => $("minOut").textContent = e.target.value;
+  if (id) $("cDel").onclick = () => { $("delArea").innerHTML = `<div class="confirm">Delete ${esc(c.name)} and all their plans? This can't be undone.<button class="btn danger small" type="button" id="dy">Delete</button><button class="btn quiet small" type="button" id="dn">Keep</button></div>`; $("dn").onclick = () => childFormView(id); $("dy").onclick = async () => { await db.deleteChild(id); toast("Profile deleted"); location.hash = "#/"; }; };
+  $("cForm").onsubmit = async e => {
+    e.preventDefault(); addInt();
+    const name = $("cName").value.trim(); if (!name) { $("cMsg").textContent = "Add a first name or nickname."; return; }
+    const y = parseInt($("cYear").value, 10);
+    const rec = { name, birth_year: isNaN(y) ? null : y, state: $("cState").value, support_level: document.querySelector("input[name=lvl]:checked")?.value || "high",
+      communication: $("cComm").value.trim(), interests, sensory_notes: $("cSens").value.trim(), goals: $("cGoals").value.trim(), minutes_per_day: +$("cMin").value };
+    if (id) rec.id = id;
+    try { const saved = await db.saveChild(rec); toast("Profile saved"); location.hash = `#/child/${saved.id}`; } catch(err){ $("cMsg").textContent = err.message; }
+  };
+}
+
+async function childView(id){
+  const [c, plans] = await Promise.all([db.child(id), db.plans(id)]);
+  const fw = FW[c.state] || FW.WA;
+  const wk = iso(mondayOf(new Date()));
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small"><a href="#/">← Your family</a></p>
+    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:4px"><h1>${esc(c.name)}</h1><p class="muted">${age(c.birth_year) ? `Age ${age(c.birth_year)} · ` : ""}${esc(SUP[c.support_level]?.label)} · ${esc(fw.name)}</p></div><a class="btn quiet" href="#/child/${id}/edit">Edit profile</a></div>
+    <div class="chips">${(c.interests||[]).map(i => `<span class="chip">${esc(i)}</span>`).join("") || `<span class="muted small">Add favourite things to their profile for better plans.</span>`}</div>
+    <form class="card stack" id="genForm">
+      <h2>Plan a week</h2>
+      <div class="grid2">
+        <label class="f">Week starting <input type="date" id="gWeek" value="${wk}" required></label>
+        <label class="f">Focus this week <small>Optional</small><input type="text" id="gFocus" maxlength="200" placeholder="e.g. asking for help, counting to 10"></label>
+      </div>
+      <label class="f">Anything else? <small>Optional: appointments, outings, what's working</small><textarea id="gExtra" maxlength="500"></textarea></label>
+      <div class="row"><button class="btn primary" type="submit" id="gGo">Create ${esc(c.name)}'s plan</button><span id="gWait" hidden><span class="spinner"></span> Writing ${esc(c.name)}'s week. This takes about 30–60 seconds.</span></div>
+      <p id="gMsg" role="alert" style="color:var(--bad)"></p>
+    </form>
+    <div class="stack"><h2>Plans</h2>
+      ${plans.length ? `<div class="plans">${plans.map(p => `<a class="planrow" href="#/plan/${p.id}"><span><b>Week of ${nice(p.week_start)}</b><br><span class="muted small">${esc(p.title || "")}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : `<p class="muted">No plans yet. Create the first one above.</p>`}
+    </div>
+  </div>`;
+  $("genForm").onsubmit = async e => {
+    e.preventDefault(); const week = $("gWeek").value; if (!week) return;
+    $("gGo").disabled = true; $("gWait").hidden = false; $("gMsg").textContent = "";
+    try { const p = await db.generate(c, week, $("gFocus").value.trim(), $("gExtra").value.trim()); location.hash = `#/plan/${p.id}`; }
+    catch(err){ $("gMsg").textContent = err.message; $("gGo").disabled = false; $("gWait").hidden = true; }
+  };
+}
+
+async function planView(id, dayIdx = 0){
+  const p = await db.plan(id); const c = await db.child(p.child_id).catch(() => ({ name: "", id: p.child_id }));
+  const logs = Object.fromEntries((await db.logs(id)).map(l => [l.lesson_key, l]));
+  const ct = p.content; const cov = coverage(ct);
+  const total = ct.days.reduce((n,d) => n + d.lessons.length, 0);
+  const done = Object.values(logs).filter(l => l.rating).length;
+  const lessonHTML = (l, d, k) => { const key = `${d}-${k}`, lg = logs[key] || {};
+    return `<article class="card lesson" data-key="${key}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start"><h3>${esc(l.title)}</h3><span class="chip">${l.minutes} min</span></div>
+      <div class="chips">${(l.areas||[]).map(a => `<span class="chip">${esc(a)}</span>`).join("")}</div>
+      <dl>${l.goal ? `<dt>Goal</dt><dd>${esc(l.goal)}</dd>` : ""}${l.hook ? `<dt>Hook</dt><dd>${esc(l.hook)}</dd>` : ""}${l.materials ? `<dt>You'll need</dt><dd>${esc(l.materials)}</dd>` : ""}
+        ${l.steps?.length ? `<dt>Steps</dt><dd><ol>${l.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol></dd>` : ""}
+        ${l.communication ? `<dt>Communication</dt><dd>${esc(l.communication)}</dd>` : ""}${l.adjustments ? `<dt>Adjustments</dt><dd>${esc(l.adjustments)}</dd>` : ""}${l.evidence ? `<dt>Evidence</dt><dd>${esc(l.evidence)}</dd>` : ""}</dl>
+      <div class="hpi"><span class="small muted">How did it go?</span>${[["H","Full help"],["P","Prompted"],["I","Independent"],["skipped","Skipped"]].map(([r,t]) => `<button type="button" data-r="${r}" aria-pressed="${lg.rating === r}">${t}</button>`).join("")}</div>
+      <input type="text" class="lnote noprint" placeholder="Quick note (optional)" value="${esc(lg.note || "")}" maxlength="300" aria-label="Note for ${esc(l.title)}">
+      <div class="row noprint"><button class="btn quiet small" type="button" data-edit>Edit lesson</button><button class="btn danger small" type="button" data-del>Remove</button></div>
+    </article>`; };
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small noprint"><a href="#/child/${p.child_id}">← ${esc(c.name)}</a></p>
+    <div class="stack" style="gap:6px"><h1>${esc(ct.title || "Weekly plan")}</h1><p class="muted">${esc(c.name)} · Week of ${nice(p.week_start)} · ${esc(ct.framework || "")}</p></div>
+    ${ct.summary ? `<p>${esc(ct.summary)}</p>` : ""}
+    <div class="card stack"><div class="row" style="justify-content:space-between"><h3>This week's progress</h3><span class="small muted">${done} of ${total} lessons recorded</span></div><div class="progress"><i style="width:${total ? Math.round(done/total*100) : 0}%"></i></div></div>
+    ${ct.focus_goals?.length ? `<div class="card stack"><h3>Focus goals</h3><ul style="margin:0;padding-left:20px">${ct.focus_goals.map(g => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
+    <div class="card stack"><h3>Learning areas covered</h3><div class="cover">${Object.entries(cov).map(([a,n]) => `<div class="area ${n ? "ok" : "miss"}"><span>${esc(a)}</span><b>${n || "none"}</b></div>`).join("")}</div>
+      ${Object.values(cov).some(n => !n) ? `<p class="small" style="color:var(--bad)">Add a lesson for any area marked "none" so the week covers every learning area.</p>` : `<p class="small" style="color:var(--good)">Every learning area is covered this week.</p>`}</div>
+    <div class="daytabs noprint" role="tablist">${ct.days.map((d,i) => `<button type="button" role="tab" data-day="${i}" aria-pressed="${i === dayIdx}">${esc(d.day)}</button>`).join("")}</div>
+    ${ct.days.map((d,i) => `<section class="day stack" data-d="${i}" ${i === dayIdx ? "" : "hidden"}><h2>${esc(d.day)}</h2>${d.regulation ? `<p class="banner">Regulation: ${esc(d.regulation)}</p>` : ""}${d.lessons.map((l,k) => lessonHTML(l,i,k)).join("")}<div class="noprint"><button class="btn quiet" type="button" data-add="${i}">Add your own lesson</button></div></section>`).join("")}
+    <div class="row noprint"><button class="btn" type="button" id="pPrint">Print this plan</button><span id="pDelArea"><button class="btn danger" type="button" id="pDel">Delete plan</button></span></div>
+  </div>`;
+  view.querySelector(".daytabs").onclick = e => { const b = e.target.closest("[data-day]"); if (!b) return; const i = +b.dataset.day; view.querySelectorAll(".daytabs button").forEach(x => x.setAttribute("aria-pressed", x === b)); view.querySelectorAll("section.day").forEach(s => s.hidden = +s.dataset.d !== i); dayIdx = i; };
+  view.querySelectorAll("article.lesson").forEach(a => {
+    const key = a.dataset.key, [d,k] = key.split("-").map(Number);
+    a.querySelector(".hpi").onclick = async e => { const b = e.target.closest("button[data-r]"); if (!b) return; const r = b.getAttribute("aria-pressed") === "true" ? null : b.dataset.r; await db.log(id, key, r, a.querySelector(".lnote").value); planView(id, dayIdx); };
+    a.querySelector(".lnote").onchange = async e => { await db.log(id, key, (logs[key]||{}).rating || null, e.target.value); toast("Note saved"); };
+    a.querySelector("[data-del]").onclick = async () => { ct.days[d].lessons.splice(k,1); await db.savePlanContent(id, ct); toast("Lesson removed"); planView(id, dayIdx); };
+    a.querySelector("[data-edit]").onclick = () => editLesson(a, ct, d, k, id, dayIdx);
+  });
+  view.querySelectorAll("[data-add]").forEach(b => b.onclick = async () => { const d = +b.dataset.add; ct.days[d].lessons.push({ title:"New lesson", areas:[], minutes:10, goal:"", hook:"", materials:"", steps:[], communication:"", adjustments:"", evidence:"" }); await db.savePlanContent(id, ct); await planView(id, d); const arts = view.querySelectorAll(`section.day[data-d="${d}"] article.lesson`); const last = arts[arts.length-1]; editLesson(last, ct, d, ct.days[d].lessons.length-1, id, d); last.scrollIntoView({ block:"center" }); });
+  $("pPrint").onclick = () => window.print();
+  $("pDel").onclick = () => { $("pDelArea").innerHTML = `<span class="confirm">Delete this plan and its records?<button class="btn danger small" type="button" id="pdy">Delete</button><button class="btn quiet small" type="button" id="pdn">Keep</button></span>`; $("pdn").onclick = () => planView(id, dayIdx); $("pdy").onclick = async () => { await db.deletePlan(id); toast("Plan deleted"); location.hash = `#/child/${p.child_id}`; }; };
+}
+
+function editLesson(article, ct, d, k, planId, dayIdx){
+  const l = ct.days[d].lessons[k]; const areas = ct.areas || [];
+  article.innerHTML = `<form class="stack" novalidate>
+    <label class="f">Title <input type="text" name="title" value="${esc(l.title)}" maxlength="120"></label>
+    <div class="stack" style="gap:6px"><b>Learning areas</b><div class="chips">${areas.map(a => `<label class="chip" style="cursor:pointer"><input type="checkbox" name="areas" value="${esc(a)}" ${(l.areas||[]).includes(a) ? "checked" : ""}> ${esc(a)}</label>`).join("")}</div></div>
+    <div class="grid2"><label class="f">Minutes <input type="number" name="minutes" min="3" max="60" value="${l.minutes}"></label><label class="f">Goal <input type="text" name="goal" value="${esc(l.goal)}" maxlength="300"></label></div>
+    <label class="f">Hook <input type="text" name="hook" value="${esc(l.hook)}" maxlength="300"></label>
+    <label class="f">You'll need <input type="text" name="materials" value="${esc(l.materials)}" maxlength="300"></label>
+    <label class="f">Steps <small>One per line</small><textarea name="steps" rows="5">${esc((l.steps||[]).join("\n"))}</textarea></label>
+    <label class="f">Communication <input type="text" name="communication" value="${esc(l.communication)}" maxlength="300"></label>
+    <label class="f">Adjustments <input type="text" name="adjustments" value="${esc(l.adjustments)}" maxlength="300"></label>
+    <label class="f">Evidence <input type="text" name="evidence" value="${esc(l.evidence)}" maxlength="200"></label>
+    <div class="row"><button class="btn primary" type="submit">Save lesson</button><button class="btn quiet" type="button" data-cancel>Cancel</button></div></form>`;
+  const f = article.querySelector("form");
+  f.querySelector("[data-cancel]").onclick = () => planView(planId, dayIdx);
+  f.onsubmit = async e => { e.preventDefault(); const fd = new FormData(f);
+    ct.days[d].lessons[k] = { title: fd.get("title").trim() || "Lesson", areas: fd.getAll("areas"), minutes: Math.max(3, Math.min(60, +fd.get("minutes") || 10)), goal: fd.get("goal").trim(), hook: fd.get("hook").trim(), materials: fd.get("materials").trim(), steps: fd.get("steps").split("\n").map(s => s.trim()).filter(Boolean), communication: fd.get("communication").trim(), adjustments: fd.get("adjustments").trim(), evidence: fd.get("evidence").trim() };
+    await db.savePlanContent(planId, ct); toast("Lesson saved"); planView(planId, dayIdx); };
+}
+
+/* ---------- router ---------- */
+async function route(){
+  const h = location.hash.replace(/^#/, "") || "/";
+  if (LIVE && /access_token|type=recovery|error_description/.test(location.hash)) return; // supabase handles the redirect
+  if (h === "/new-password") return newPasswordView();
+  if (!user) user = await db.session();
+  $("acct").hidden = !user; $("acctEmail").textContent = user?.email || "";
+  if (!LIVE) $("signOut").hidden = true;
+  if (!user) { if (h === "/signup") return authView("up"); if (h === "/reset") return authView("reset"); return authView("in"); }
+  window.scrollTo(0, 0);
+  let m;
+  if (h === "/" || h === "/signin" || h === "/signup") return guard(homeView);
+  if (h === "/child/new") return guard(() => childFormView());
+  if ((m = h.match(/^\/child\/([\w-]+)\/edit$/))) return guard(() => childFormView(m[1]));
+  if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));
+  if ((m = h.match(/^\/plan\/([\w-]+)$/))) return guard(() => planView(m[1]));
+  return guard(homeView);
+}
+$("signOut").onclick = async () => { await db.signOut(); user = null; location.hash = "#/signin"; route(); };
+window.addEventListener("hashchange", route);
+route();
+})();
+</script>
+</body>
+</html>
