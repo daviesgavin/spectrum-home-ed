@@ -17,3 +17,6 @@ drop policy if exists "own jobs" on public.plan_jobs;
 create policy "own jobs" on public.plan_jobs for select using (parent_id = auth.uid());
 grant select on public.plan_jobs to authenticated;
 grant all on public.plan_jobs to service_role;
+
+-- The background planner saves plans with the server key
+grant all on public.plans, public.children, public.lesson_logs, public.generations to service_role;
