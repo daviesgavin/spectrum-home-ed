@@ -74,6 +74,13 @@ begin
   end loop;
 end $$;
 
+-- Let signed-in users reach the tables through the API (row level security still limits them to their own rows)
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.children, public.plans, public.lesson_logs to authenticated;
+grant select on public.generations to authenticated;
+grant all on public.generations to service_role;
+grant usage, select on all sequences in schema public to service_role;
+
 drop policy if exists "own generations select" on public.generations;
 create policy "own generations select" on public.generations for select using (parent_id = auth.uid());
 -- inserts into generations happen only from the edge function with the service role

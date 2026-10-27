@@ -78,8 +78,11 @@ Deno.serve(async (req) => {
   if (!apiKey) return json({ error: "The lesson planner isn't set up yet (missing ANTHROPIC_API_KEY secret)." }, 500);
 
   const url = Deno.env.get("SUPABASE_URL")!;
-  const anon = Deno.env.get("SUPABASE_ANON_KEY")!;
-  const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // Works with both the legacy keys and the newer publishable/secret keys
+  const firstKey = (name: string) => { try { const v = JSON.parse(Deno.env.get(name) ?? "{}"); return Array.isArray(v) ? v[0] : Object.values(v)[0]; } catch { return undefined; } };
+  const anon = Deno.env.get("SUPABASE_ANON_KEY") || (firstKey("SUPABASE_PUBLISHABLE_KEYS") as string);
+  const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || (firstKey("SUPABASE_SECRET_KEYS") as string);
+  if (!anon || !service) return json({ error: "Server keys are missing. Check the function's environment." }, 500);
   const authHeader = req.headers.get("Authorization") ?? "";
   const userClient = createClient(url, anon, { global: { headers: { Authorization: authHeader } } });
   const admin = createClient(url, service);
