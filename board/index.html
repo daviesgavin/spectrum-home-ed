@@ -118,6 +118,17 @@ body{margin:0;-webkit-touch-callout:none;overscroll-behavior:none}
 html{height:100%;box-sizing:border-box}
 img{max-width:100%}
 [hidden]{display:none!important}
+.tile{position:relative}
+.tile .hand{position:absolute;top:8px;right:8px;font-size:18px;background:var(--surface);border-radius:999px;width:30px;height:30px;display:grid;place-items:center}
+.signview{flex:none;position:relative;background:var(--surface);border:2px solid var(--accent);border-radius:18px;overflow:hidden;cursor:pointer}
+.signview video{display:block;width:100%;max-height:34vh;object-fit:contain;background:#000}
+.signview .x{position:absolute;top:8px;right:8px;background:var(--surface);color:var(--ink);border-radius:999px;padding:4px 10px;font-weight:800;font-size:14px}
+.vprev{width:100%;max-height:260px;border-radius:12px;background:#000}
+.links{display:flex;flex-direction:column;gap:10px}
+.links a{display:block;padding:12px;border-radius:12px;background:var(--bg);color:var(--ink);text-decoration:none;font-weight:700}
+.links a span{display:block;font-weight:500;color:var(--muted);font-size:13px;margin-top:2px}
+.toggle{flex-direction:row;align-items:center;gap:10px;font-size:15px}
+.toggle input{width:22px;height:22px}
 </style>
 </head>
 <body>
@@ -128,6 +139,7 @@ img{max-width:100%}
     <div class="said empty" id="sText">Tap a picture to talk</div>
     <button class="again" id="again" disabled>Again</button>
   </div>
+  <div class="signview" id="signView" hidden aria-label="Sign video. Tap to hide."><video id="signVid" playsinline muted loop></video><span class="x">Hide ✕</span></div>
   <div class="cats" id="cats" role="toolbar" aria-label="Categories"></div>
   <div class="grid" id="grid"></div>
   <div class="foot">
@@ -145,6 +157,7 @@ img{max-width:100%}
       <button class="btn" data-t="phrases" aria-pressed="true">Phrases</button>
       <button class="btn" data-t="scripts" aria-pressed="false">My child's scripts</button>
       <button class="btn" data-t="used" aria-pressed="false">Most used</button>
+      <button class="btn" data-t="signs" aria-pressed="false">Signs</button>
       <button class="btn" data-t="voice" aria-pressed="false">Voice</button>
       <button class="btn" data-t="backup" aria-pressed="false">Backup</button>
     </div>
@@ -164,6 +177,15 @@ img{max-width:100%}
         <div class="row">
           <label>Or a photo <input type="file" id="fFile" accept="image/*"></label>
         </div>
+        <div class="row">
+          <label>Key word to sign <input type="text" id="fKey" placeholder="car"></label>
+          <a class="btn" id="fLook" target="_blank" rel="noopener" href="https://auslan.org.au/dictionary/">Look up in Auslan Signbank ↗</a>
+        </div>
+        <div class="row">
+          <label>Sign video (film yourself signing the key word) <input type="file" id="fVid" accept="video/*"></label>
+        </div>
+        <video class="vprev" id="fVidPrev" playsinline muted loop controls hidden></video>
+        <div class="row" id="fVidRow" hidden><button class="btn danger" id="fVidDel">Remove sign video</button></div>
         <div class="row">
           <button class="btn primary" id="fSave">Add phrase</button>
           <button class="btn" id="fTest">Hear it</button>
@@ -197,6 +219,26 @@ img{max-width:100%}
       </section>
     </div>
 
+    <div data-p="signs" hidden>
+      <section class="card">
+        <h2>Signs</h2>
+        <p class="hint">Signing sits alongside speech, the board, gestures and scripts. Every way your child communicates counts, and their own version of a sign is a real sign. Key Word Sign means signing just the main word while you speak the whole sentence.</p>
+        <p class="hint">To add a sign: edit a phrase, look up its key word in Auslan Signbank, then film yourself doing the sign for 3 to 5 seconds. When your child taps that phrase, your video plays above the board. Phrases with a sign show a 🤟.</p>
+        <label class="toggle"><input type="checkbox" id="sigShow"> Show sign videos when a phrase is tapped</label>
+        <div class="list" id="sigList"></div>
+        <p class="hint">Sign videos are saved on this phone only and are not included in backup files. Keep your clips on your phone as well.</p>
+      </section>
+      <section class="card">
+        <h2>Learn to sign (free)</h2>
+        <div class="links">
+          <a href="https://auslan.org.au/dictionary/" target="_blank" rel="noopener">Auslan Signbank dictionary ↗<span>Free video dictionary of Auslan signs, the signs Key Word Sign uses in Australia.</span></a>
+          <a href="https://kwsa.org.au/resources/" target="_blank" rel="noopener">Key Word Sign Australia resources ↗<span>Includes free sign-along songs such as B-I-N-G-O, Jack and Jill and Happy Birthday.</span></a>
+          <a href="https://raisingchildren.net.au/autism/therapies-guide/key-word-sign" target="_blank" rel="noopener">Raising Children Network: Key Word Sign ↗<span>Free plain-English guide to what Key Word Sign is and how families use it.</span></a>
+          <a href="https://kwsa.org.au/training/" target="_blank" rel="noopener">Find a Key Word Sign workshop ↗<span>Paid workshops near you or online. Ask your NDIS planner or support coordinator whether your plan can cover one.</span></a>
+        </div>
+      </section>
+    </div>
+
     <div data-p="voice" hidden>
       <section class="card">
         <h2>Voice</h2>
@@ -211,7 +253,7 @@ img{max-width:100%}
     <div data-p="backup" hidden>
       <section class="card">
         <h2>Backup</h2>
-        <p class="hint">Everything is saved on this device only. Save a backup after adding photos or scripts, so a new phone or a reset doesn't lose your child's board. Choose "Save to Files" (iCloud Drive) when asked.</p>
+        <p class="hint">Everything is saved on this device only. Save a backup after adding photos or scripts, so a new phone or a reset doesn't lose your child's board. Sign videos stay on this phone and are not in the backup file. Choose "Save to Files" (iCloud Drive) when asked.</p>
         <div class="row"><button class="btn primary" id="bSave">Save backup</button></div>
         <p class="hint" id="bLast"></p>
         <label>Restore from a backup file <input type="file" id="bFile" accept=".json,application/json"></label>
@@ -255,13 +297,28 @@ function speak(text){if(!('speechSynthesis' in window))return toast('This phone 
 let last=null;
 function renderCats(){$('cats').innerHTML=CATS.map(c=>`<button class="cat ${c.id}" data-c="${c.id}" aria-pressed="${S.cat===c.id}">${c.name}</button>`).join('')}
 function renderGrid(){const list=S.phrases.filter(p=>p.cat===S.cat);
-  $('grid').innerHTML=list.length?list.map(p=>`<button class="tile ${p.cat}" data-id="${p.id}"><span class="pic">${picHTML(p)}</span><span>${esc(p.text)}</span></button>`).join(''):'<p class="hint">No phrases here yet. Grown-ups can add some.</p>'}
+  $('grid').innerHTML=list.length?list.map(p=>`<button class="tile ${p.cat}" data-id="${p.id}"><span class="pic">${picHTML(p)}</span><span>${esc(p.text)}</span>${SIG.has(p.id)?'<span class="hand" aria-label="has a sign">🤟</span>':''}</button>`).join(''):'<p class="hint">No phrases here yet. Grown-ups can add some.</p>'}
 $('cats').onclick=e=>{const b=e.target.closest('.cat');if(!b)return;S.cat=b.dataset.c;save();renderCats();renderGrid();$('grid').scrollTop=0};
 $('grid').onclick=e=>{const b=e.target.closest('.tile');if(!b)return;const p=S.phrases.find(x=>x.id===b.dataset.id);if(!p)return;
   say(p);b.classList.remove('flash');void b.offsetWidth;b.classList.add('flash')};
-function say(p){last=p;speak(p.text);S.taps[p.id]=(S.taps[p.id]||0)+1;save();
+function say(p){last=p;speak(p.text);showSign(p);S.taps[p.id]=(S.taps[p.id]||0)+1;save();
   $('sPic').innerHTML=picHTML(p);const t=$('sText');t.textContent=p.text;t.classList.remove('empty');$('again').disabled=false}
-$('again').onclick=()=>{if(last)speak(last.text)};
+$('again').onclick=()=>{if(last){speak(last.text);showSign(last)}};
+
+/* sign videos (stored on this device in IndexedDB) */
+const SIG=new Set();let dbP=null;
+function db(){return dbP||(dbP=new Promise((res,rej)=>{const r=indexedDB.open('spectrum-talk-signs',1);r.onupgradeneeded=()=>r.result.createObjectStore('v');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}))}
+async function vOp(mode,fn){const d=await db();return new Promise((res,rej)=>{const t=d.transaction('v',mode);const q=fn(t.objectStore('v'));t.oncomplete=()=>res(q&&q.result);t.onerror=()=>rej(t.error)})}
+const vGet=id=>vOp('readonly',s=>s.get(id)),vPut=(id,b)=>vOp('readwrite',s=>s.put(b,id)),vDel=id=>vOp('readwrite',s=>s.delete(id)),vClear=()=>vOp('readwrite',s=>s.clear());
+async function loadSigns(){try{const ks=await vOp('readonly',s=>s.getAllKeys());SIG.clear();(ks||[]).forEach(k=>SIG.add(k));renderGrid()}catch(e){}}
+let sigURL='';
+async function showSign(p){const v=$('signVid');if(S.signShow===false||!SIG.has(p.id)){hideSign();return}
+  try{const b=await vGet(p.id);if(!b||last!==p)return;if(sigURL)URL.revokeObjectURL(sigURL);sigURL=URL.createObjectURL(b);v.src=sigURL;$('signView').hidden=false;v.play().catch(()=>{})}catch(e){}}
+function hideSign(){const v=$('signVid');v.pause();$('signView').hidden=true}
+$('signView').onclick=hideSign;
+const STOP=new Set('a an the i im i\'m me my we us you your it its is am are to for of in on at and or so lets let\'s let time please want need go going some this that one be do did all'.split(' '));
+function keyWord(t){const w=t.toLowerCase().replace(/[^a-z' ]/g,' ').split(/\s+/).filter(x=>x&&!STOP.has(x));return w[0]||t.toLowerCase().replace(/[^a-z ]/g,'').trim().split(' ')[0]||''}
+function updLook(){const k=$('fKey').value.trim()||keyWord($('fText').value);$('fLook').href=k?'https://auslan.org.au/dictionary/search/?query='+encodeURIComponent(k):'https://auslan.org.au/dictionary/'}
 
 /* hold-to-open lock */
 let holdT=null,holdStart=0,raf=0;const ring=$('ringFg'),HOLD=2000;
@@ -278,37 +335,52 @@ $('close').onclick=()=>{$('panel').hidden=true;resetForm();renderGrid()};
 $('ptabs').onclick=e=>{const b=e.target.closest('[data-t]');if(!b)return;
   document.querySelectorAll('#ptabs .btn').forEach(x=>x.setAttribute('aria-pressed',x===b));
   document.querySelectorAll('[data-p]').forEach(s=>s.hidden=s.dataset.p!==b.dataset.t);renderPanel()};
-function renderPanel(){renderPList();renderSList();renderUList();
+function renderSigList(){const ps=S.phrases.filter(p=>SIG.has(p.id));$('sigShow').checked=S.signShow!==false;
+  $('sigList').innerHTML=ps.length?ps.map(p=>`<div class="item"><span class="mini">${picHTML(p)}</span><span class="txt">${esc(p.text)}<span class="sub">Sign: ${esc(p.key||keyWord(p.text))}</span></span><button class="btn" data-sp="${p.id}">Watch</button></div>`).join(''):'<p class="hint">No sign videos yet. Edit a phrase on the Phrases tab to add one.</p>'}
+$('sigShow').onchange=e=>{S.signShow=e.target.checked;save()};
+$('sigList').onclick=e=>{const id=e.target.dataset.sp;if(!id)return;const p=S.phrases.find(x=>x.id===id);if(!p)return;
+  vGet(id).then(b=>{if(!b)return;const w=document.createElement('video');w.className='vprev';w.playsInline=true;w.controls=true;w.muted=true;w.src=URL.createObjectURL(b);
+    const it=e.target.closest('.item');const nx=it.nextElementSibling;if(nx&&nx.tagName==='VIDEO')nx.remove();it.after(w);w.play().catch(()=>{})})};
+function renderPanel(){renderPList();renderSList();renderUList();renderSigList();
   $('vPitch').value=S.voice.pitch;$('vRate').value=S.voice.rate}
 
 /* phrase form */
-let editing=null,pendingImg='';
-function resetForm(){editing=null;pendingImg='';$('fText').value='';$('fEmoji').value='';$('fFile').value='';$('fCat').value=S.cat;
+let editing=null,pendingImg='',pendingVid=null,dropVid=false,prevURL='';
+function setVidPrev(blob){const v=$('fVidPrev');if(prevURL){URL.revokeObjectURL(prevURL);prevURL=''}
+  if(blob){prevURL=URL.createObjectURL(blob);v.src=prevURL;v.hidden=false;$('fVidRow').hidden=false}else{v.removeAttribute('src');v.hidden=true;$('fVidRow').hidden=true}}
+function resetForm(){editing=null;pendingImg='';pendingVid=null;dropVid=false;$('fText').value='';$('fEmoji').value='';$('fFile').value='';$('fKey').value='';$('fVid').value='';setVidPrev(null);updLook();$('fCat').value=S.cat;
   $('formTitle').textContent='Add a phrase';$('fSave').textContent='Add phrase';$('fCancel').hidden=true;updPrev()}
 function updPrev(){$('fPrev').innerHTML=pendingImg?`<img alt="" src="${pendingImg}">`:esc($('fEmoji').value||'⭐')}
 $('fEmoji').oninput=updPrev;
 $('fFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{
   const max=320,sc=Math.min(1,max/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);
   c.getContext('2d').drawImage(im,0,0,c.width,c.height);pendingImg=c.toDataURL('image/jpeg',0.72);updPrev()};im.src=r.result};r.readAsDataURL(f)};
+$('fText').addEventListener('input',updLook);$('fKey').oninput=updLook;
+$('fVid').onchange=e=>{const f=e.target.files[0];if(!f)return;if(f.size>60e6){e.target.value='';return toast('That video is too long. Try a 3 to 5 second clip.')}
+  pendingVid=f;dropVid=false;setVidPrev(f)};
+$('fVidDel').onclick=()=>{pendingVid=null;dropVid=true;$('fVid').value='';setVidPrev(null)};
 $('fTest').onclick=()=>{const t=$('fText').value.trim();if(t)speak(t)};
 $('fSave').onclick=()=>{const text=$('fText').value.trim();if(!text)return toast('Type the phrase first');
-  const data={text,emoji:$('fEmoji').value.trim()||'⭐',cat:$('fCat').value};
+  const data={text,emoji:$('fEmoji').value.trim()||'⭐',cat:$('fCat').value,key:$('fKey').value.trim()};
+  let id=editing;
   if(editing){const p=S.phrases.find(x=>x.id===editing);Object.assign(p,data);if(pendingImg)p.img=pendingImg;toast('Phrase updated')}
-  else{S.phrases.push({id:uid(),...data,img:pendingImg});toast('Phrase added')}
-  save();resetForm();renderPList()};
+  else{id=uid();S.phrases.push({id,...data,img:pendingImg});toast('Phrase added')}
+  const vid=pendingVid,drop=dropVid;save();resetForm();renderPList();
+  (async()=>{try{if(vid){await vPut(id,vid);SIG.add(id)}else if(drop){await vDel(id);SIG.delete(id)}}catch(e){toast('Could not save the sign video on this phone')}renderPList();renderSigList();renderGrid()})()};
 $('fCancel').onclick=resetForm;
 function renderPList(){$('pList').innerHTML=CATS.map(c=>{const ps=S.phrases.filter(p=>p.cat===c.id);
-  return `<p class="hint" style="font-weight:700">${c.name}</p>`+ps.map(p=>`<div class="item"><span class="mini">${picHTML(p)}</span><span class="txt">${esc(p.text)}</span>
+  return `<p class="hint" style="font-weight:700">${c.name}</p>`+ps.map(p=>`<div class="item"><span class="mini">${picHTML(p)}</span><span class="txt">${esc(p.text)}${SIG.has(p.id)?' 🤟':''}</span>
   <button class="btn" data-ed="${p.id}">Edit</button>${p.img?`<button class="btn" data-np="${p.id}">Remove photo</button>`:''}<button class="btn danger" data-del="${p.id}">Delete</button></div>`).join('')}).join('')}
 $('pList').onclick=e=>{const b=e.target;
-  if(b.dataset.ed){const p=S.phrases.find(x=>x.id===b.dataset.ed);editing=p.id;pendingImg='';$('fText').value=p.text;$('fEmoji').value=p.emoji;$('fCat').value=p.cat;
+  if(b.dataset.ed){const p=S.phrases.find(x=>x.id===b.dataset.ed);editing=p.id;pendingImg='';$('fText').value=p.text;$('fEmoji').value=p.emoji;$('fCat').value=p.cat;$('fKey').value=p.key||'';updLook();pendingVid=null;dropVid=false;$('fVid').value='';setVidPrev(null);
+    if(SIG.has(p.id))vGet(p.id).then(b=>{if(editing===p.id&&b)setVidPrev(b)}).catch(()=>{});
     $('fPrev').innerHTML=picHTML(p);$('formTitle').textContent='Edit phrase';$('fSave').textContent='Save changes';$('fCancel').hidden=false;$('panel').scrollTo({top:0,behavior:'smooth'})}
   if(b.dataset.np){const p=S.phrases.find(x=>x.id===b.dataset.np);p.img='';save();renderPList()}
-  if(b.dataset.del){S.phrases=S.phrases.filter(x=>x.id!==b.dataset.del);delete S.taps[b.dataset.del];save();renderPList();toast('Phrase deleted')}};
+  if(b.dataset.del){S.phrases=S.phrases.filter(x=>x.id!==b.dataset.del);delete S.taps[b.dataset.del];vDel(b.dataset.del).catch(()=>{});SIG.delete(b.dataset.del);save();renderPList();toast('Phrase deleted')}};
 function confirmIn(areaId,msg,yes,onYes,restore){const a=$(areaId);const old=a.innerHTML;
   a.innerHTML=`<div class="confirm">${msg}<button class="btn danger" id="cy">${yes}</button><button class="btn" id="cn">Keep</button></div>`;
   $('cy').onclick=()=>{onYes();a.innerHTML=old;restore()};$('cn').onclick=()=>{a.innerHTML=old;restore()}}
-function bindReset(){$('reset').onclick=()=>confirmIn('resetArea','Replace all phrases with the starter set? Your own phrases and photos will be removed.','Reset',()=>{S.phrases=starter();S.taps={};save();renderPList();toast('Starter phrases restored')},bindReset)}
+function bindReset(){$('reset').onclick=()=>confirmIn('resetArea','Replace all phrases with the starter set? Your own phrases, photos and sign videos will be removed.','Reset',()=>{S.phrases=starter();S.taps={};vClear().catch(()=>{});SIG.clear();save();renderPList();toast('Starter phrases restored')},bindReset)}
 bindReset();
 
 /* scripts */
@@ -338,7 +410,7 @@ let tt;function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clear
 try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}
 
 if(!CATS.some(c=>c.id===S.cat))S.cat='go';
-renderCats();renderGrid();resetForm();
+renderCats();renderGrid();resetForm();loadSigns();
 
 /* backup */
 function showLast(){$('bLast').textContent=S.lastBackup?('Last backup: '+S.lastBackup):'No backup saved yet.'}
@@ -353,7 +425,7 @@ $('bFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileR
   try{d=JSON.parse(r.result)}catch(x){return toast('That file is not a Spectrum Talk backup')}
   if(!d||!Array.isArray(d.phrases))return toast('That file is not a Spectrum Talk backup');
   const a=$('restoreArea');a.innerHTML=`<div class="confirm">Replace this board with the backup (${d.phrases.length} phrases, ${(d.scripts||[]).length} scripts)?<button class="btn danger" id="ry">Restore</button><button class="btn" id="rn">Keep</button></div>`;
-  $('ry').onclick=()=>{S={...S,...d,voice:{...S.voice,...(d.voice||{})}};delete S.app;delete S.saved;save();a.innerHTML='';$('bFile').value='';renderPanel();renderCats();renderGrid();toast('Board restored')};
+  $('ry').onclick=()=>{S={...S,...d,voice:{...S.voice,...(d.voice||{})}};delete S.app;delete S.saved;save();a.innerHTML='';$('bFile').value='';renderPanel();renderCats();renderGrid();loadSigns();toast('Board restored')};
   $('rn').onclick=()=>{a.innerHTML='';$('bFile').value=''}};r.readAsText(f)};
 const _rp=renderPanel;renderPanel=function(){_rp();showLast()};
 
