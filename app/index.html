@@ -541,7 +541,7 @@ async function guideView(id){
       <p class="small muted">Checked against official pages on ${esc(window.SHE_GUIDE_VERIFIED)}. Rules can change, so confirm anything important with ${esc(g.authority.split(",")[0])}. This guide is general information, not legal advice.</p></div>
   </div>`;
   view.querySelectorAll("[data-step]").forEach(cb => cb.onchange = async () => {
-    const cl = { ...(c.checklist || {}) }; if (cb.checked) cl[cb.dataset.step] = new Date().toISOString().slice(0, 10); else delete cl[cb.dataset.step];
+    const cl = { ...(c.checklist || {}) }; if (cb.checked) cl[cb.dataset.step] = iso(new Date()); else delete cl[cb.dataset.step];
     try { await db.saveChild({ id, checklist: cl }); toast(cb.checked ? "Ticked off" : "Unticked"); guideView(id); } catch(e){ toast(e.message); cb.checked = !cb.checked; } });
   view.querySelectorAll("[data-date]").forEach(inp => inp.onchange = async () => {
     try { await db.saveChild({ id, [inp.dataset.date]: inp.value || null }); toast("Date saved"); guideView(id); } catch(e){ toast(e.message); } });
