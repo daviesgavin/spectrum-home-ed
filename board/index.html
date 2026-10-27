@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Spectrum Talk">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#2a7fa8">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>Spectrum Talk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&display=swap">
+<style>
+/* Layout: one-screen phone board — spoken-phrase strip on top, category rail, big 2-up picture tiles; parent tools behind a hold-to-open lock */
+:root{
+  --bg:#eef4f7;
+  --surface:#ffffff;
+  --ink:#1d2b36;
+  --muted:#5d7180;
+  --line:#d3dee6;
+  --accent:#2a7fa8;      /* pool blue */
+  --go:#dff0e4;  --go-ink:#246b3c;
+  --food:#fde9d6;--food-ink:#9a4a12;
+  --watch:#e6e3f8;--watch-ink:#4a3f9a;
+  --feel:#fbe1e6;--feel-ink:#9a2f47;
+  --play:#fdf1c4;--play-ink:#7a5a00;
+  --flash:#fff6c7;
+  --danger:#b3263e;
+  --display:"Baloo 2", "Trebuchet MS", system-ui, sans-serif;
+  --body:"Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121b22;--surface:#1b2731;--ink:#e8f0f5;--muted:#9bb0bf;--line:#2c3c48;--accent:#6cc1e8;
+  --go:#1d3326;--go-ink:#8fd8a8;--food:#3a2818;--food-ink:#f4b27c;--watch:#272444;--watch-ink:#b9b0f5;--feel:#3a1f27;--feel-ink:#f39cb0;--play:#3a3214;--play-ink:#f2d066;
+  --flash:#4a4320;--danger:#f0788c;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121b22;--surface:#1b2731;--ink:#e8f0f5;--muted:#9bb0bf;--line:#2c3c48;--accent:#6cc1e8;
+  --go:#1d3326;--go-ink:#8fd8a8;--food:#3a2818;--food-ink:#f4b27c;--watch:#272444;--watch-ink:#b9b0f5;--feel:#3a1f27;--feel-ink:#f39cb0;--play:#3a3214;--play-ink:#f2d066;
+  --flash:#4a4320;--danger:#f0788c;color-scheme:dark}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+.app{height:100%;display:flex;flex-direction:column;gap:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px;max-width:760px;margin:0 auto;box-sizing:border-box}
+.strip{display:flex;align-items:center;gap:12px;background:var(--surface);border:2px solid var(--line);border-radius:18px;padding:10px 12px;min-height:64px}
+.strip .pic{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;font-size:32px;overflow:hidden;flex:none;background:var(--bg)}
+.strip .pic img{width:100%;height:100%;object-fit:cover}
+.strip .said{font-family:var(--display);font-weight:800;font-size:clamp(20px,5.5vw,30px);line-height:1.1;flex:1;min-width:0;text-wrap:balance}
+.strip .said.empty{color:var(--muted);font-weight:600;font-size:18px}
+.again{flex:none;border:0;background:var(--accent);color:var(--surface);font-family:var(--display);font-weight:800;font-size:16px;border-radius:14px;padding:10px 14px;cursor:pointer}
+.again:disabled{opacity:.35}
+.cats{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;flex:none}
+.cats::-webkit-scrollbar{display:none}
+.cat{flex:1 0 auto;border:2px solid transparent;border-radius:14px;padding:10px 14px;font-family:var(--display);font-weight:800;font-size:18px;cursor:pointer;background:var(--surface);color:var(--muted)}
+.cat[aria-pressed="true"]{border-color:currentColor}
+.cat.go[aria-pressed="true"]{background:var(--go);color:var(--go-ink)}
+.cat.food[aria-pressed="true"]{background:var(--food);color:var(--food-ink)}
+.cat.watch[aria-pressed="true"]{background:var(--watch);color:var(--watch-ink)}
+.cat.feel[aria-pressed="true"]{background:var(--feel);color:var(--feel-ink)}
+.cat.play[aria-pressed="true"]{background:var(--play);color:var(--play-ink)}
+.grid{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-content:start;padding-bottom:4px}
+@media (min-width:600px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.tile{border:0;border-radius:22px;padding:12px 10px 14px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;font-family:var(--display);font-weight:800;font-size:clamp(17px,4.6vw,22px);line-height:1.1;text-align:center;transition:transform .12s}
+.tile .pic{width:100%;aspect-ratio:4/3;max-width:100%;border-radius:14px;display:grid;place-items:center;font-size:clamp(48px,14vw,72px);overflow:hidden;background:var(--surface)}
+.tile .pic img{width:100%;height:100%;object-fit:cover}
+.tile.go{background:var(--go);color:var(--go-ink)}
+.tile.food{background:var(--food);color:var(--food-ink)}
+.tile.watch{background:var(--watch);color:var(--watch-ink)}
+.tile.feel{background:var(--feel);color:var(--feel-ink)}
+.tile.play{background:var(--play);color:var(--play-ink)}
+.tile:active{transform:scale(.96)}
+.tile.flash{animation:flash .6s}
+@keyframes flash{0%{box-shadow:0 0 0 0 var(--accent)}40%{box-shadow:0 0 0 6px var(--accent)}100%{box-shadow:0 0 0 0 transparent}}
+.foot{display:flex;justify-content:flex-end;flex:none}
+.lock{position:relative;border:0;background:transparent;color:var(--muted);font-family:var(--body);font-size:13px;padding:6px 8px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.ring{width:22px;height:22px}
+.ring circle{fill:none;stroke-width:3}
+.ring .bgc{stroke:var(--line)}
+.ring .fg{stroke:var(--accent);stroke-dasharray:57;stroke-dashoffset:57;transform:rotate(-90deg);transform-origin:center}
+/* parent panel */
+.panel{position:fixed;inset:0;background:var(--bg);overflow-y:auto;z-index:20;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.pin{max-width:640px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 40px;display:flex;flex-direction:column;gap:18px}
+.phead{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.phead h1{font-family:var(--display);font-weight:800;font-size:26px;margin:0}
+.btn{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:9px 14px;font:700 15px var(--body);cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.btn.danger{color:var(--danger)}
+.btn:focus-visible,.tile:focus-visible,.cat:focus-visible,.again:focus-visible,.lock:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs .btn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+section.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+section.card h2{font-family:var(--display);font-size:20px;margin:0}
+.hint{color:var(--muted);font-size:14px;margin:0;line-height:1.45;max-width:62ch}
+label{display:flex;flex-direction:column;gap:4px;font-weight:700;font-size:14px}
+input[type=text],select,textarea{font:500 16px var(--body);padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);user-select:text;-webkit-user-select:text}
+textarea{min-height:60px;resize:vertical}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.row>label{flex:1 1 140px;min-width:0}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;background:var(--bg)}
+.item .mini{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:24px;overflow:hidden;flex:none;background:var(--surface)}
+.item .mini img{width:100%;height:100%;object-fit:cover}
+.item .txt{flex:1;min-width:0;font-weight:700;overflow-wrap:anywhere}
+.item .sub{display:block;font-weight:500;color:var(--muted);font-size:13px}
+.item .btn{padding:6px 10px;font-size:13px}
+.count{font-variant-numeric:tabular-nums;font-weight:800;color:var(--accent);min-width:2.5ch;text-align:right}
+.preview{width:72px;height:72px;border-radius:12px;display:grid;place-items:center;font-size:40px;overflow:hidden;background:var(--bg)}
+.preview img{width:100%;height:100%;object-fit:cover}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--feel);color:var(--feel-ink);border-radius:12px;padding:10px;font-weight:700}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:700;z-index:30}
+input[type=range]{width:100%}
+@media (prefers-reduced-motion:reduce){.tile,.tile.flash{transition:none;animation:none}}
+*{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;-webkit-touch-callout:none;overscroll-behavior:none}
+html{height:100%;box-sizing:border-box}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <div class="strip" aria-live="polite">
+    <div class="pic" id="sPic">💬</div>
+    <div class="said empty" id="sText">Tap a picture to talk</div>
+    <button class="again" id="again" disabled>Again</button>
+  </div>
+  <div class="cats" id="cats" role="toolbar" aria-label="Categories"></div>
+  <div class="grid" id="grid"></div>
+  <div class="foot">
+    <button class="lock" id="lock" aria-label="Hold for 2 seconds to open grown-up settings">
+      <svg class="ring" viewBox="0 0 22 22"><circle class="bgc" cx="11" cy="11" r="9"/><circle class="fg" id="ringFg" cx="11" cy="11" r="9"/></svg>
+      Grown-ups: hold
+    </button>
+  </div>
+</div>
+
+<div class="panel" id="panel" hidden>
+  <div class="pin">
+    <div class="phead"><h1>Grown-up settings</h1><a class="btn" href="../">Spectrum Home Ed</a><button class="btn primary" id="close">Back to board</button></div>
+    <div class="tabs" id="ptabs">
+      <button class="btn" data-t="phrases" aria-pressed="true">Phrases</button>
+      <button class="btn" data-t="scripts" aria-pressed="false">My child's scripts</button>
+      <button class="btn" data-t="used" aria-pressed="false">Most used</button>
+      <button class="btn" data-t="voice" aria-pressed="false">Voice</button>
+      <button class="btn" data-t="backup" aria-pressed="false">Backup</button>
+    </div>
+
+    <div data-p="phrases">
+      <section class="card">
+        <h2 id="formTitle">Add a phrase</h2>
+        <p class="hint">Use whole, fun phrases the way your child hears them, like a favourite show's catchphrase. A photo of the real thing (the pool, the family car, a favourite snack) works best.</p>
+        <div class="row">
+          <div class="preview" id="fPrev">⭐</div>
+          <label>Phrase your child hears <input type="text" id="fText" placeholder="Time for the pool!"></label>
+        </div>
+        <div class="row">
+          <label>Picture (emoji) <input type="text" id="fEmoji" placeholder="🏊" maxlength="4"></label>
+          <label>Group <select id="fCat"><option value="go">Go places</option><option value="food">Food</option><option value="watch">Watch</option><option value="feel">Feelings</option><option value="play">Play and people</option></select></label>
+        </div>
+        <div class="row">
+          <label>Or a photo <input type="file" id="fFile" accept="image/*"></label>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="fSave">Add phrase</button>
+          <button class="btn" id="fTest">Hear it</button>
+          <button class="btn" id="fCancel" hidden>Cancel edit</button>
+        </div>
+      </section>
+      <section class="card" style="margin-top:18px">
+        <h2>All phrases</h2>
+        <div class="list" id="pList"></div>
+        <div id="resetArea"><button class="btn danger" id="reset">Reset to starter phrases</button></div>
+      </section>
+    </div>
+
+    <div data-p="scripts" hidden>
+      <section class="card">
+        <h2>My child's scripts</h2>
+        <p class="hint">Write down the jingles and lines your child says, and what they seem to mean at the time. Over weeks this becomes a dictionary of his language you can share with his speech pathologist.</p>
+        <label>What they said <input type="text" id="sHeard" placeholder="A line from an ad or a show"></label>
+        <label>What it seemed to mean <input type="text" id="sMeant" placeholder="Wants to go out in the car"></label>
+        <div class="row"><button class="btn primary" id="sAdd">Save script</button><button class="btn" id="sCopy">Copy all as text</button></div>
+        <div class="list" id="sList"></div>
+      </section>
+    </div>
+
+    <div data-p="used" hidden>
+      <section class="card">
+        <h2>Most used</h2>
+        <p class="hint">How many times each button has been tapped on this phone. Popular buttons show what your child wants to say most.</p>
+        <div class="list" id="uList"></div>
+        <div id="clearArea"><button class="btn" id="clearTaps">Clear counts</button></div>
+      </section>
+    </div>
+
+    <div data-p="voice" hidden>
+      <section class="card">
+        <h2>Voice</h2>
+        <p class="hint">A higher, slower voice sounds more sing-song, like the jingles many kids love.</p>
+        <label>Voice <select id="vName"></select></label>
+        <label>Sing-song (pitch) <input type="range" id="vPitch" min="0.6" max="2" step="0.1"></label>
+        <label>Speed <input type="range" id="vRate" min="0.5" max="1.4" step="0.05"></label>
+        <div class="row"><button class="btn primary" id="vTest">Hear it</button></div>
+      </section>
+    </div>
+
+    <div data-p="backup" hidden>
+      <section class="card">
+        <h2>Backup</h2>
+        <p class="hint">Everything is saved on this device only. Save a backup after adding photos or scripts, so a new phone or a reset doesn't lose your child's board. Choose "Save to Files" (iCloud Drive) when asked.</p>
+        <div class="row"><button class="btn primary" id="bSave">Save backup</button></div>
+        <p class="hint" id="bLast"></p>
+        <label>Restore from a backup file <input type="file" id="bFile" accept=".json,application/json"></label>
+        <div id="restoreArea"></div>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const KEY='spectrum-talk-v1';
+const CATS=[{id:'go',name:'Go places'},{id:'food',name:'Food'},{id:'watch',name:'Watch'},{id:'feel',name:'Feelings'},{id:'play',name:'Play and people'}];
+const START=[
+ ['go','🚗',"Let's go in the car!"],['go','🏊','Time for the pool!'],['go','🏖️',"Let's go to the beach!"],['go','🛝','Playground time!'],['go','🛒',"Let's go to the shops!"],['go','🏠',"Let's go home."],['go','🚶',"Let's go for a walk!"],['go','🛁','Bath time!'],
+ ['food','🍎','I want a snack!'],['food','🍔','Burger, yum!'],['food','🍕','Pizza time!'],['food','🍽️',"I'm hungry."],['food','➕','I want more!'],['food','🥤','Drink please!'],
+ ['watch','▶️',"Let's watch a video!"],['watch','🔁','Play it again!'],['watch','📺','My show is on!'],['watch','🎵','Music time!'],['watch','🎨','Art time!'],['watch','🎮','Game time!'],
+ ['feel','😄',"I'm happy!"],['feel','✋','All done!'],['feel','😮','Uh oh!'],['feel','🙉','Too loud!'],['feel','🛋️','I need a break.'],['feel','🤗','I need a hug.'],['feel','🆘','Help me please.'],['feel','🛑','Stop!'],
+ ['play','🎯',"Let's play!"],['play','🙋','My turn!'],['play','👉','Your turn!'],['play','✅','Yes, that one!'],['play','❌','No thank you.'],['play','🏆','I did it!'],['play','📞','I need help.'],['play','👋','Hello!']
+];
+const uid=()=>Math.random().toString(36).slice(2,9);
+function starter(){return START.map(([cat,emoji,text])=>({id:uid(),cat,emoji,text,img:''}))}
+let S={phrases:starter(),scripts:[],taps:{},voice:{name:'',pitch:1.4,rate:0.85},cat:'go'};
+try{const raw=localStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);S={...S,...d,voice:{...S.voice,...(d.voice||{})}}}}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Could not save on this phone — photo may be too big')}}
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const picHTML=p=>p.img?`<img alt="" src="${p.img}">`:esc(p.emoji||'⭐');
+
+/* speech */
+let voices=[];
+function loadVoices(){try{voices=speechSynthesis.getVoices().filter(v=>/^en/i.test(v.lang))}catch(e){voices=[]}
+  const sel=$('vName');sel.innerHTML='<option value="">Phone default</option>'+voices.map(v=>`<option ${v.name===S.voice.name?'selected':''}>${esc(v.name)}</option>`).join('');
+  if(!S.voice.name){const au=voices.find(v=>/en-AU/i.test(v.lang));if(au){S.voice.name=au.name;sel.value=au.name}}}
+if('speechSynthesis' in window){loadVoices();speechSynthesis.onvoiceschanged=loadVoices}
+function speak(text){if(!('speechSynthesis' in window))return toast('This phone cannot speak aloud');
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);const v=voices.find(v=>v.name===S.voice.name);if(v){u.voice=v;u.lang=v.lang}else u.lang='en-AU';
+  u.pitch=+S.voice.pitch;u.rate=+S.voice.rate;speechSynthesis.speak(u)}catch(e){}}
+
+/* board */
+let last=null;
+function renderCats(){$('cats').innerHTML=CATS.map(c=>`<button class="cat ${c.id}" data-c="${c.id}" aria-pressed="${S.cat===c.id}">${c.name}</button>`).join('')}
+function renderGrid(){const list=S.phrases.filter(p=>p.cat===S.cat);
+  $('grid').innerHTML=list.length?list.map(p=>`<button class="tile ${p.cat}" data-id="${p.id}"><span class="pic">${picHTML(p)}</span><span>${esc(p.text)}</span></button>`).join(''):'<p class="hint">No phrases here yet. Grown-ups can add some.</p>'}
+$('cats').onclick=e=>{const b=e.target.closest('.cat');if(!b)return;S.cat=b.dataset.c;save();renderCats();renderGrid();$('grid').scrollTop=0};
+$('grid').onclick=e=>{const b=e.target.closest('.tile');if(!b)return;const p=S.phrases.find(x=>x.id===b.dataset.id);if(!p)return;
+  say(p);b.classList.remove('flash');void b.offsetWidth;b.classList.add('flash')};
+function say(p){last=p;speak(p.text);S.taps[p.id]=(S.taps[p.id]||0)+1;save();
+  $('sPic').innerHTML=picHTML(p);const t=$('sText');t.textContent=p.text;t.classList.remove('empty');$('again').disabled=false}
+$('again').onclick=()=>{if(last)speak(last.text)};
+
+/* hold-to-open lock */
+let holdT=null,holdStart=0,raf=0;const ring=$('ringFg'),HOLD=2000;
+function holdTick(){const f=Math.min(1,(Date.now()-holdStart)/HOLD);ring.style.strokeDashoffset=57*(1-f);if(f<1)raf=requestAnimationFrame(holdTick)}
+function holdEnd(){clearTimeout(holdT);cancelAnimationFrame(raf);ring.style.strokeDashoffset=57}
+$('lock').addEventListener('pointerdown',e=>{e.preventDefault();holdStart=Date.now();raf=requestAnimationFrame(holdTick);holdT=setTimeout(()=>{holdEnd();openPanel()},HOLD)});
+['pointerup','pointerleave','pointercancel'].forEach(ev=>$('lock').addEventListener(ev,holdEnd));
+$('lock').addEventListener('contextmenu',e=>e.preventDefault());
+$('lock').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.shiftKey)openPanel()});
+function openPanel(){$('panel').hidden=false;renderPanel()}
+$('close').onclick=()=>{$('panel').hidden=true;resetForm();renderGrid()};
+
+/* panel tabs */
+$('ptabs').onclick=e=>{const b=e.target.closest('[data-t]');if(!b)return;
+  document.querySelectorAll('#ptabs .btn').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  document.querySelectorAll('[data-p]').forEach(s=>s.hidden=s.dataset.p!==b.dataset.t);renderPanel()};
+function renderPanel(){renderPList();renderSList();renderUList();
+  $('vPitch').value=S.voice.pitch;$('vRate').value=S.voice.rate}
+
+/* phrase form */
+let editing=null,pendingImg='';
+function resetForm(){editing=null;pendingImg='';$('fText').value='';$('fEmoji').value='';$('fFile').value='';$('fCat').value=S.cat;
+  $('formTitle').textContent='Add a phrase';$('fSave').textContent='Add phrase';$('fCancel').hidden=true;updPrev()}
+function updPrev(){$('fPrev').innerHTML=pendingImg?`<img alt="" src="${pendingImg}">`:esc($('fEmoji').value||'⭐')}
+$('fEmoji').oninput=updPrev;
+$('fFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{
+  const max=320,sc=Math.min(1,max/Math.max(im.width,im.height));const c=document.createElement('canvas');c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);
+  c.getContext('2d').drawImage(im,0,0,c.width,c.height);pendingImg=c.toDataURL('image/jpeg',0.72);updPrev()};im.src=r.result};r.readAsDataURL(f)};
+$('fTest').onclick=()=>{const t=$('fText').value.trim();if(t)speak(t)};
+$('fSave').onclick=()=>{const text=$('fText').value.trim();if(!text)return toast('Type the phrase first');
+  const data={text,emoji:$('fEmoji').value.trim()||'⭐',cat:$('fCat').value};
+  if(editing){const p=S.phrases.find(x=>x.id===editing);Object.assign(p,data);if(pendingImg)p.img=pendingImg;toast('Phrase updated')}
+  else{S.phrases.push({id:uid(),...data,img:pendingImg});toast('Phrase added')}
+  save();resetForm();renderPList()};
+$('fCancel').onclick=resetForm;
+function renderPList(){$('pList').innerHTML=CATS.map(c=>{const ps=S.phrases.filter(p=>p.cat===c.id);
+  return `<p class="hint" style="font-weight:700">${c.name}</p>`+ps.map(p=>`<div class="item"><span class="mini">${picHTML(p)}</span><span class="txt">${esc(p.text)}</span>
+  <button class="btn" data-ed="${p.id}">Edit</button>${p.img?`<button class="btn" data-np="${p.id}">Remove photo</button>`:''}<button class="btn danger" data-del="${p.id}">Delete</button></div>`).join('')}).join('')}
+$('pList').onclick=e=>{const b=e.target;
+  if(b.dataset.ed){const p=S.phrases.find(x=>x.id===b.dataset.ed);editing=p.id;pendingImg='';$('fText').value=p.text;$('fEmoji').value=p.emoji;$('fCat').value=p.cat;
+    $('fPrev').innerHTML=picHTML(p);$('formTitle').textContent='Edit phrase';$('fSave').textContent='Save changes';$('fCancel').hidden=false;$('panel').scrollTo({top:0,behavior:'smooth'})}
+  if(b.dataset.np){const p=S.phrases.find(x=>x.id===b.dataset.np);p.img='';save();renderPList()}
+  if(b.dataset.del){S.phrases=S.phrases.filter(x=>x.id!==b.dataset.del);delete S.taps[b.dataset.del];save();renderPList();toast('Phrase deleted')}};
+function confirmIn(areaId,msg,yes,onYes,restore){const a=$(areaId);const old=a.innerHTML;
+  a.innerHTML=`<div class="confirm">${msg}<button class="btn danger" id="cy">${yes}</button><button class="btn" id="cn">Keep</button></div>`;
+  $('cy').onclick=()=>{onYes();a.innerHTML=old;restore()};$('cn').onclick=()=>{a.innerHTML=old;restore()}}
+function bindReset(){$('reset').onclick=()=>confirmIn('resetArea','Replace all phrases with the starter set? Your own phrases and photos will be removed.','Reset',()=>{S.phrases=starter();S.taps={};save();renderPList();toast('Starter phrases restored')},bindReset)}
+bindReset();
+
+/* scripts */
+function renderSList(){$('sList').innerHTML=S.scripts.length?S.scripts.slice().reverse().map(s=>`<div class="item"><span class="txt">"${esc(s.heard)}"<span class="sub">${esc(s.meant||'Meaning not sure yet')} · ${esc(s.date)}</span></span><button class="btn danger" data-sd="${s.id}">Delete</button></div>`).join(''):'<p class="hint">No scripts saved yet.</p>'}
+$('sAdd').onclick=()=>{const h=$('sHeard').value.trim();if(!h)return toast('Type what your child said');
+  S.scripts.push({id:uid(),heard:h,meant:$('sMeant').value.trim(),date:new Date().toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})});
+  save();$('sHeard').value='';$('sMeant').value='';renderSList();toast('Script saved')};
+$('sList').onclick=e=>{if(e.target.dataset.sd){S.scripts=S.scripts.filter(s=>s.id!==e.target.dataset.sd);save();renderSList()}};
+$('sCopy').onclick=()=>{const txt=S.scripts.map(s=>`${s.date}: "${s.heard}" — ${s.meant||'meaning not sure yet'}`).join('\n')||'No scripts yet';
+  navigator.clipboard.writeText(txt).then(()=>toast('Copied — paste into an email or notes')).catch(()=>toast('Copy not allowed here'))};
+
+/* most used */
+function renderUList(){const rows=S.phrases.map(p=>({p,n:S.taps[p.id]||0})).filter(r=>r.n).sort((a,b)=>b.n-a.n);
+  $('uList').innerHTML=rows.length?rows.map(r=>`<div class="item"><span class="mini">${picHTML(r.p)}</span><span class="txt">${esc(r.p.text)}</span><span class="count">${r.n}</span></div>`).join(''):'<p class="hint">No taps yet. Counts appear here once your child starts using the board.</p>'}
+function bindClear(){$('clearTaps').onclick=()=>confirmIn('clearArea','Clear all tap counts?','Clear',()=>{S.taps={};save();renderUList()},bindClear)}
+bindClear();
+
+/* voice */
+$('vName').onchange=e=>{S.voice.name=e.target.value;save()};
+$('vPitch').oninput=e=>{S.voice.pitch=+e.target.value;save()};
+$('vRate').oninput=e=>{S.voice.rate=+e.target.value;save()};
+$('vTest').onclick=()=>speak("Let's go in the car!");
+
+let tt;function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,2200)}
+
+/* keep screen awake while open */
+try{navigator.wakeLock&&navigator.wakeLock.request('screen').catch(()=>{})}catch(e){}
+
+if(!CATS.some(c=>c.id===S.cat))S.cat='go';
+renderCats();renderGrid();resetForm();
+
+/* backup */
+function showLast(){$('bLast').textContent=S.lastBackup?('Last backup: '+S.lastBackup):'No backup saved yet.'}
+$('bSave').onclick=async()=>{const d=new Date();const name='spectrum-talk-backup-'+d.toISOString().slice(0,10)+'.json';
+  const data=JSON.stringify({...S,app:'spectrum-talk',saved:d.toISOString()});
+  const file=new File([data],name,{type:'application/json'});
+  try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Spectrum Talk backup'})}
+    else{const a=document.createElement('a');a.href=URL.createObjectURL(file);a.download=name;document.body.appendChild(a);a.click();a.remove()}
+    S.lastBackup=d.toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});save();showLast();toast('Backup ready')}
+  catch(e){if(e&&e.name!=='AbortError')toast('Backup did not save. Try again.')}};
+$('bFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{let d;
+  try{d=JSON.parse(r.result)}catch(x){return toast('That file is not a Spectrum Talk backup')}
+  if(!d||!Array.isArray(d.phrases))return toast('That file is not a Spectrum Talk backup');
+  const a=$('restoreArea');a.innerHTML=`<div class="confirm">Replace this board with the backup (${d.phrases.length} phrases, ${(d.scripts||[]).length} scripts)?<button class="btn danger" id="ry">Restore</button><button class="btn" id="rn">Keep</button></div>`;
+  $('ry').onclick=()=>{S={...S,...d,voice:{...S.voice,...(d.voice||{})}};delete S.app;delete S.saved;save();a.innerHTML='';$('bFile').value='';renderPanel();renderCats();renderGrid();toast('Board restored')};
+  $('rn').onclick=()=>{a.innerHTML='';$('bFile').value=''}};r.readAsText(f)};
+const _rp=renderPanel;renderPanel=function(){_rp();showLast()};
+
+/* offline */
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
+</script>
+</body>
+</html>

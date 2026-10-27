@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="A home education curriculum for autistic, nonverbal and high-support learners from age 3 to adulthood, mapped to the WA Curriculum.">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Spectrum Home Ed</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Baloo+2:wght@600;800&display=swap">
+<style>
+/* Layout: single-column site, 1080 max; a six-colour "age spectrum" bar is the signature — it recurs as the hero graphic, the age cards and the learning-area grid */
+:root{
+  --bg:#f5f7f6;
+  --surface:#ffffff;
+  --ink:#16323a;
+  --muted:#4e6870;
+  --line:#d6e0df;
+  --accent:#1f7a8c;
+  --accent-ink:#ffffff;
+  --a1:#f2a65a; --a2:#e7c95b; --a3:#7cc49a; --a4:#5fb3c9; --a5:#7f8fd6; --a6:#c487c9;
+  --tint1:#fdeedd; --tint2:#fbf4d6; --tint3:#e3f3e9; --tint4:#ddf0f5; --tint5:#e7eafa; --tint6:#f5e8f6;
+  --display:"Baloo 2","Trebuchet MS",system-ui,sans-serif;
+  --body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1c20;--surface:#162a30;--ink:#e6f0f0;--muted:#a3babd;--line:#28414a;--accent:#5cc3d6;--accent-ink:#0f1c20;
+  --tint1:#3a2a1a;--tint2:#363017;--tint3:#1b3326;--tint4:#183139;--tint5:#232848;--tint6:#352338;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1c20;--surface:#162a30;--ink:#e6f0f0;--muted:#a3babd;--line:#28414a;--accent:#5cc3d6;--accent-ink:#0f1c20;
+  --tint1:#3a2a1a;--tint2:#363017;--tint3:#1b3326;--tint4:#183139;--tint5:#232848;--tint6:#352338;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.55}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+a{color:var(--accent)}
+h1,h2,h3{font-family:var(--display);line-height:1.1;text-wrap:balance;margin:0}
+h2{font-size:clamp(28px,4vw,40px);font-weight:800}
+h3{font-size:22px;font-weight:800}
+p{margin:0}
+.lead{color:var(--muted);font-size:19px;max-width:62ch}
+.eyebrow{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+section{padding-block:56px}
+.stack{display:flex;flex-direction:column;gap:16px}
+/* header */
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:var(--bg);border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-block:12px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);font-family:var(--display);font-weight:800;font-size:22px}
+.brand .bars{display:flex;gap:2px;height:22px;align-items:flex-end}
+.brand .bars i{display:block;width:5px;border-radius:3px}
+.nav ul{display:flex;gap:18px;list-style:none;margin:0;padding:0;flex-wrap:wrap}
+.nav ul a{color:var(--ink);text-decoration:none;font-weight:700;font-size:15px}
+.nav ul a:hover{color:var(--accent)}
+@media (max-width:640px){.nav ul{display:none}}
+/* hero */
+.hero{padding-block:56px 40px;display:grid;grid-template-columns:1.25fr 1fr;gap:40px;align-items:center}
+.hero>*{min-width:0}
+.hero h1{font-size:clamp(38px,6vw,64px);font-weight:800}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.ctas{display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px 20px;border-radius:14px;font-weight:700;text-decoration:none;border:2px solid var(--accent);font-size:16px;cursor:pointer;font-family:var(--body)}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:transparent;color:var(--accent)}
+.btn:focus-visible,a:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.check{background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:22px;display:flex;flex-direction:column;gap:14px}
+.check h3{font-size:20px}
+.check ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.check li{display:flex;gap:10px;align-items:flex-start}
+.tick{flex:none;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-size:13px;font-weight:700;margin-top:2px}
+.spectrum{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;height:14px}
+.spectrum i{border-radius:7px}
+@media (max-width:820px){.hero{grid-template-columns:1fr}}
+/* pillars */
+.pillars{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.pillar{padding:20px;border-radius:18px;background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.pillar p{color:var(--muted);font-size:16px}
+@media (max-width:900px){.pillars{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.pillars{grid-template-columns:1fr}}
+/* ages */
+.ages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.age{border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:10px;border-top:8px solid}
+.age .yrs{font-size:14px;font-weight:700;color:var(--muted)}
+.age h3{font-size:26px}
+.age ul{margin:0;padding-left:18px;font-size:16px;display:flex;flex-direction:column;gap:4px}
+.age.c1{background:var(--tint1);border-color:var(--a1)}.age.c2{background:var(--tint2);border-color:var(--a2)}.age.c3{background:var(--tint3);border-color:var(--a3)}
+.age.c4{background:var(--tint4);border-color:var(--a4)}.age.c5{background:var(--tint5);border-color:var(--a5)}.age.c6{background:var(--tint6);border-color:var(--a6)}
+@media (max-width:900px){.ages{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.ages{grid-template-columns:1fr}}
+.regnote{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:15px;color:var(--muted)}
+.regnote .bar{flex:1 1 200px;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--a1) 0%,var(--a1) 16%,var(--a2) 16%,var(--a2) 33%,var(--a3) 33%,var(--a3) 50%,var(--a4) 50%,var(--a4) 66%,var(--a5) 66%,var(--a5) 83%,var(--line) 83%)}
+/* areas */
+.areas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.area{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:6px}
+.area b{font-family:var(--display);font-size:19px}
+.area span{color:var(--muted);font-size:15px}
+@media (max-width:900px){.areas{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.areas{grid-template-columns:1fr}}
+/* lesson */
+.lesson{background:var(--surface);border:1px solid var(--line);border-radius:22px;overflow:hidden}
+.lesson-head{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:13px;font-weight:700;padding:4px 10px;border-radius:999px;background:var(--tint4);color:var(--ink)}
+.lesson dl{display:grid;grid-template-columns:160px 1fr;margin:0}
+.lesson dt,.lesson dd{padding:14px 22px;border-bottom:1px solid var(--line);margin:0}
+.lesson dt{font-weight:700;color:var(--muted)}
+.lesson dl>:nth-last-child(-n+2){border-bottom:0}
+.lesson ol{margin:0;padding-left:20px}
+@media (max-width:560px){.lesson dl{grid-template-columns:1fr}.lesson dt{border-bottom:0;padding-bottom:0}}
+/* board demo */
+.demo{display:grid;grid-template-columns:1fr 1.2fr;gap:32px;align-items:center}
+.demo>*{min-width:0}
+@media (max-width:820px){.demo{grid-template-columns:1fr}}
+.phone{background:var(--surface);border:1px solid var(--line);border-radius:32px;padding:16px;max-width:420px;width:100%;justify-self:center;display:flex;flex-direction:column;gap:12px}
+.said{min-height:56px;border-radius:16px;border:2px solid var(--line);padding:10px 14px;font-family:var(--display);font-weight:800;font-size:22px;display:flex;align-items:center;gap:10px}
+.said.empty{color:var(--muted);font-weight:600;font-size:17px}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.tile{border:0;border-radius:16px;padding:10px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;font-family:var(--display);font-weight:800;font-size:15px;line-height:1.1;cursor:pointer;color:var(--ink)}
+.tile span{font-size:34px}
+.tile:active{transform:scale(.96)}
+.t1{background:var(--tint1)}.t2{background:var(--tint2)}.t3{background:var(--tint3)}.t4{background:var(--tint4)}.t5{background:var(--tint5)}.t6{background:var(--tint6)}
+.features{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:12px}
+.features li{display:flex;gap:10px}
+/* evidence */
+.evid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;counter-reset:e}
+.evid li{list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;font-size:16px}
+.evid{padding:0;margin:0}
+@media (max-width:820px){.evid{grid-template-columns:1fr}}
+/* faq */
+details{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 20px}
+summary{font-weight:700;cursor:pointer;font-size:18px}
+details p{margin-top:10px;color:var(--muted);max-width:70ch}
+.faq{display:flex;flex-direction:column;gap:10px}
+.story{background:var(--ink);color:var(--bg);border-radius:24px;padding:32px;display:flex;flex-direction:column;gap:12px}
+.story p{max-width:64ch;font-size:19px}
+.story .eyebrow{color:var(--a2)}
+footer{border-top:1px solid var(--line);padding-block:32px 48px;color:var(--muted);font-size:14px}
+footer .stack{gap:10px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+html{scroll-behavior:smooth}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+section[id],main{scroll-margin-top:72px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top" aria-label="Spectrum Home Ed home">
+      <span class="bars" aria-hidden="true"><i style="height:10px;background:var(--a1)"></i><i style="height:14px;background:var(--a2)"></i><i style="height:18px;background:var(--a3)"></i><i style="height:22px;background:var(--a4)"></i><i style="height:18px;background:var(--a5)"></i><i style="height:14px;background:var(--a6)"></i></span>
+      Spectrum Home Ed
+    </a>
+    <ul>
+      <li><a href="#ages">Ages</a></li>
+      <li><a href="#curriculum">Curriculum</a></li>
+      <li><a href="#board">Phrase board</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap">
+    <div class="hero">
+      <div class="stack" style="gap:22px">
+        <p class="eyebrow">Home education for autistic, nonverbal and high-support learners</p>
+        <h1>Teach your child <em>their way.</em> Meet the curriculum anyway.</h1>
+        <p class="lead">A complete home learning curriculum from age 3 to adulthood, built around how kids like ours actually learn: through favourite shows, songs and real life. Every goal maps to the WA Curriculum, so you walk into your moderator meeting ready.</p>
+        <div class="ctas"><a class="btn primary" href="#ages">See the age stages</a><a class="btn ghost" href="board/">Open the free phrase board</a></div>
+      </div>
+      <div class="check" aria-label="Moderator checklist">
+        <div class="spectrum" aria-hidden="true"><i style="background:var(--a1)"></i><i style="background:var(--a2)"></i><i style="background:var(--a3)"></i><i style="background:var(--a4)"></i><i style="background:var(--a5)"></i><i style="background:var(--a6)"></i></div>
+        <h3>Ready for your moderator</h3>
+        <ul>
+          <li><span class="tick">✓</span><span>All 8 WA Curriculum learning areas covered at every age</span></li>
+          <li><span class="tick">✓</span><span>Goals adjusted for disability, as the Disability Standards for Education allow</span></li>
+          <li><span class="tick">✓</span><span>Weekly timetables and ready-to-run lesson plans</span></li>
+          <li><span class="tick">✓</span><span>Simple progress tracking: Help, Prompt, Independent</span></li>
+          <li><span class="tick">✓</span><span>An evidence folder checklist for every evaluation</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap stack" style="gap:28px">
+      <div class="stack"><p class="eyebrow">How it works</p><h2>Built for kids who learn differently</h2><p class="lead">Most curricula assume a child who speaks, sits and follows instructions. This one starts from where your child is.</p></div>
+      <div class="pillars">
+        <div class="pillar"><h3>Interest-led</h3><p>Every lesson starts from what your child already loves: a jingle, a game show, cars, water. Their interest is the way in, not a reward to earn.</p></div>
+        <div class="pillar"><h3>Regulation first</h3><p>Swings, pool, quiet time and movement sit around every learning block. A calm child learns; an overloaded one can't.</p></div>
+        <div class="pillar"><h3>Communication everywhere</h3><p>Gestures, signs, AAC, scripts, speech: every lesson includes a chance to request, choose, comment or say no.</p></div>
+        <div class="pillar"><h3>Short and real</h3><p>5–10 minute blocks for young or high-support learners. Shop trips, cooking and the car count as lessons and as evidence.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="ages">
+    <div class="wrap stack" style="gap:28px">
+      <div class="stack"><p class="eyebrow">Age stages</p><h2>From first requests to adult life</h2><p class="lead">Six stages, each with focus areas, goals for all eight learning areas, a weekly timetable, lesson plans and an activity bank. Ages are a guide: pick the stage that fits your child's skills.</p></div>
+      <div class="ages">
+        <article class="age c1"><p class="yrs">Kindy and Pre-primary</p><h3>Ages 3–5</h3><ul><li>Play, cause and effect</li><li>First requests: reach, point, tap</li><li>Feeling safe at home</li></ul></article>
+        <article class="age c2"><p class="yrs">Years 1–3</p><h3>Ages 6–8</h3><ul><li>A communication system they use</li><li>Visual routines, first–then</li><li>Matching, sorting, counting to 5</li></ul></article>
+        <article class="age c3"><p class="yrs">Years 4–6</p><h3>Ages 9–11</h3><ul><li>Phrases and scripts</li><li>Logos, signs and sight words</li><li>Shops, cafes and libraries</li></ul></article>
+        <article class="age c4"><p class="yrs">Years 7–9</p><h3>Ages 12–14</h3><ul><li>Puberty and personal care</li><li>Laundry, cooking, money</li><li>Body safety, public and private</li></ul></article>
+        <article class="age c5"><p class="yrs">Years 10–12</p><h3>Ages 15–17</h3><ul><li>SCSA Preliminary courses</li><li>Work skills and volunteering</li><li>Planning for adult life</li></ul></article>
+        <article class="age c6"><p class="yrs">After school</p><h3>Ages 18+</h3><ul><li>NDIS adult supports</li><li>A week with purpose</li><li>Community and choice</li></ul></article>
+      </div>
+      <div class="regnote"><span>WA home education registration: Pre-primary to age 17½ or 18</span><span class="bar" aria-hidden="true"></span><span>then adult life</span></div>
+    </div>
+  </section>
+
+  <section id="curriculum">
+    <div class="wrap stack" style="gap:28px">
+      <div class="stack"><p class="eyebrow">Curriculum coverage</p><h2>All eight learning areas, adjusted for your child</h2><p class="lead">WA moderators check that your program and your child's progress are consistent with the WA Curriculum. Here's what each learning area looks like for a high-support learner.</p></div>
+      <div class="areas">
+        <div class="area"><b>English</b><span>AAC, scripts and signs, shared books, logos and sight words, mark-making</span></div>
+        <div class="area"><b>Mathematics</b><span>Matching, sorting, counting, money, time and routines</span></div>
+        <div class="area"><b>Science</b><span>Senses, water play, plants, animals, weather, cooking changes</span></div>
+        <div class="area"><b>HASS</b><span>Family, home, community places, rules and safety</span></div>
+        <div class="area"><b>Health and PE</b><span>Self-care, feelings, regulation, swimming, movement</span></div>
+        <div class="area"><b>The Arts</b><span>Music, jingles, rhythm, drawing, craft and dance</span></div>
+        <div class="area"><b>Technologies</b><span>Tablets and AAC, cause and effect, simple cooking</span></div>
+        <div class="area"><b>Languages</b><span>Often covered through Auslan key word signs</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack" style="gap:28px">
+      <div class="stack"><p class="eyebrow">Sample lesson plan · Ages 9–11</p><h2>Every lesson fits on one card</h2><p class="lead">The same seven-part format across the whole curriculum, so you can run it in minutes and write your own.</p></div>
+      <article class="lesson">
+        <div class="lesson-head"><h3>Shopping with a picture list</h3><div class="chips"><span class="chip">Mathematics</span><span class="chip">HASS</span><span class="chip">10–15 min</span></div></div>
+        <dl>
+          <dt>Goal</dt><dd>Finds 3 items from a picture list and counts them into the basket</dd>
+          <dt>Hook</dt><dd>One item on the list is their favourite snack</dd>
+          <dt>Steps</dt><dd><ol><li>Make the picture list together at home</li><li>At the shop, point to item 1 and find it together</li><li>Tick it off, then the next item</li><li>Count the items at the checkout</li></ol></dd>
+          <dt>Communication</dt><dd>Model "found it!" and "all done!"</dd>
+          <dt>Adjustments</dt><dd>Quiet time of day, headphones, leave before overload</dd>
+          <dt>Evidence</dt><dd>Photo of the ticked list, plus H / P / I</dd>
+        </dl>
+      </article>
+    </div>
+  </section>
+
+  <section id="board">
+    <div class="wrap demo">
+      <div class="stack" style="gap:20px">
+        <p class="eyebrow">Free with the curriculum</p>
+        <h2>A phrase board that talks the way they think</h2>
+        <p class="lead">Many autistic kids are gestalt language processors: they learn language in whole phrases, often from shows, ads and songs. Single-picture systems can feel wrong to them. Our phrase board speaks whole, sing-song phrases instead.</p>
+        <ul class="features">
+          <li><span class="tick">✓</span><span>Add your own phrases and photos of their real favourites</span></li>
+          <li><span class="tick">✓</span><span>Record your child's scripts and what they mean</span></li>
+          <li><span class="tick">✓</span><span>Installs on an iPhone or iPad home screen and works offline</span></li>
+          <li><span class="tick">✓</span><span>Grown-up settings locked behind a 2-second hold</span></li>
+        </ul>
+        <div class="ctas"><a class="btn primary" href="board/">Open the phrase board</a></div>
+      </div>
+      <div class="phone" aria-label="Phrase board demo">
+        <div class="said empty" id="said" aria-live="polite">Tap a picture to hear it</div>
+        <div class="tiles">
+          <button class="tile t1" data-say="Let's go in the car!"><span>🚗</span>Car ride</button>
+          <button class="tile t4" data-say="Time for the pool!"><span>🏊</span>Pool</button>
+          <button class="tile t3" data-say="I want more!"><span>➕</span>More</button>
+          <button class="tile t2" data-say="Play it again!"><span>🔁</span>Again</button>
+          <button class="tile t5" data-say="I need a break."><span>🛋️</span>Break</button>
+          <button class="tile t6" data-say="All done!"><span>✋</span>All done</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap stack" style="gap:28px">
+      <div class="stack"><p class="eyebrow">Moderator meeting</p><h2>Your evidence folder, sorted</h2><p class="lead">Keep these six things in one folder or phone album, and the yearly evaluation becomes a conversation about how your child is going.</p></div>
+      <ul class="evid">
+        <li>Your child's goals from this curriculum, with your adjustments noted</li>
+        <li>A simple weekly timetable</li>
+        <li>Help / Prompt / Independent tracking sheets</li>
+        <li>2–3 dated photos or short videos per learning area each term</li>
+        <li>Therapy reports that show related goals</li>
+        <li>A one-page summary of progress since the last evaluation</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="story">
+        <p class="eyebrow">Why we made this</p>
+        <p>Spectrum Home Ed started with a West Australian dad home-educating his nonverbal autistic son, who loves jingles, game shows and swings. The existing options were built for kids who talk and sit at a desk. This is the curriculum we wished we'd been handed on day one.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap stack" style="gap:24px">
+      <h2>Questions parents ask</h2>
+      <div class="faq">
+        <details><summary>Is home education legal for a child with a disability?</summary><p>Yes. In WA, any parent can register as a home educator with the Department of Education. Your child's program can be adjusted to their needs; the Department says programs should be flexible to individual needs and abilities.</p></details>
+        <details><summary>Will this meet the education department's requirements?</summary><p>Every age stage maps its goals to the eight WA Curriculum learning areas, which is what moderators check against. The final decision is always your moderator's, so use the evidence folder checklist and talk to them early about your adjustments.</p></details>
+        <details><summary>When does registration start and end in WA?</summary><p>From the start of the year your child turns 5½ (Pre-primary) until the end of the year they turn 17½ or 18, whichever comes first. You book your first moderator meeting within 3 months of registering, then yearly.</p></details>
+        <details><summary>What about Years 11 and 12?</summary><p>SCSA offers Preliminary courses for students with an intellectual disability or learning difficulty. Units are chosen to fit an individual plan. Preliminary units alone don't count toward WACE, but VET, workplace learning and endorsed programs such as ASDAN can.</p></details>
+        <details><summary>We're not in WA. Does it still work?</summary><p>The teaching approach works anywhere. Each state registers home educators differently (NESA in NSW, VRQA in Victoria, the Home Education Unit in Queensland, and so on), but most expect the main learning areas to be covered. Check your state's rules before registering.</p></details>
+        <details><summary>My child doesn't talk. Can they still do this?</summary><p>Yes. This curriculum was written for nonverbal and minimally speaking children first. Pointing, signs, a phrase board, AAC and scripts all count as communication, and as progress.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap stack">
+    <p><strong>Spectrum Home Ed</strong> is a parent-made resource. It is not affiliated with or endorsed by the Department of Education, SCSA or the NDIS. It doesn't replace advice from your child's therapists or your home education moderator.</p>
+    <p>Sources: <a href="https://www.education.wa.edu.au/home-schooling" target="_blank" rel="noopener">WA Department of Education: home schooling</a> · <a href="https://www.education.wa.edu.au/schooling" target="_blank" rel="noopener">Compulsory schooling</a> · <a href="https://k10outline.scsa.wa.edu.au/home/wa-curriculum/learning-areas" target="_blank" rel="noopener">WA Curriculum learning areas</a> · <a href="https://parent.scsa.wa.edu.au/what-will-my-child-learn/is-there-a-curriculum-for-students-with-disability-in-years-11-and-12" target="_blank" rel="noopener">SCSA: Years 11 and 12 for students with disability</a> · <a href="https://australiancurriculum.edu.au/resources/student-diversity/meeting-the-needs-of-students-with-a-disability" target="_blank" rel="noopener">ACARA: students with disability</a></p>
+  </div>
+</footer>
+
+<script>
+const said=document.getElementById('said');
+document.querySelectorAll('.tile').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.dataset.say;said.textContent=t;said.classList.remove('empty');
+  try{if('speechSynthesis' in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-AU';u.pitch=1.4;u.rate=.9;speechSynthesis.speak(u)}}catch(e){}
+}));
+</script>
+</body>
+</html>
