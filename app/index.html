@@ -88,7 +88,7 @@ textarea{min-height:72px;resize:vertical}
 .psec textarea{width:100%;font:16px/1.55 var(--body);padding:12px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);resize:vertical;min-height:120px}
 .ptext{white-space:pre-wrap}
 .printonly{display:none}
-@media print{.printonly{display:block}.psec{break-inside:avoid-page;border:0;padding:0}}
+@media print{.printonly{display:block}.psec{border:0!important;padding:0!important;box-shadow:none!important}.toast{display:none!important}}
 .dues{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .due{padding:8px 10px;border-radius:10px;background:var(--bg);border-left:4px solid var(--line)}
 .due.soon{border-left-color:#d99a2b}
@@ -435,7 +435,7 @@ async function childView(id){
         <span class="small" style="color:var(--accent);font-weight:700">Open the step-by-step guide →</span></a>`; })()}
     ${LIVE && window.SHE_GUIDES?.[c.state] ? `<div class="card stack"><div class="row" style="justify-content:space-between"><h2>Registration pack</h2></div>
       <p class="small muted">The written ${esc(PACK_NAME[c.state] || "education program")} ${esc(window.SHE_GUIDES[c.state].name)} asks for, drafted from ${esc(c.name)}'s profile. You check and edit it before sending.</p>
-      ${progs.length ? `<div class="plans">${progs.map(p => `<a class="planrow" href="#/program/${p.id}"><span><b>${esc(p.title || "Program")}</b><br><span class="muted small">Written ${nice(p.created_at.slice(0,10))}${p.updated_at && p.updated_at.slice(0,10) !== p.created_at.slice(0,10) ? ` · edited ${nice(p.updated_at.slice(0,10))}` : ""}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : ""}
+      ${progs.length ? `<div class="plans">${progs.map(p => `<a class="planrow" href="#/program/${p.id}"><span><b>${esc(p.title || "Program")}</b><br><span class="muted small">Written ${nice(iso(new Date(p.created_at)))}${p.updated_at && iso(new Date(p.updated_at)) !== iso(new Date(p.created_at)) ? ` · edited ${nice(iso(new Date(p.updated_at)))}` : ""}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : ""}
       <div><a class="btn ${progs.length ? "quiet" : "primary"}" href="#/child/${id}/program">${progs.length ? "Write a new version" : `Write ${esc(c.name)}'s ${esc(PACK_NAME[c.state] || "program")}`}</a></div></div>` : ""}
     <form class="card stack" id="genForm">
       <h2>Plan a week</h2>
@@ -570,7 +570,7 @@ async function programView(id){
   const asText = () => `${p.title}\n\n` + ct.sections.map(x => `${x.heading.toUpperCase()}\n${x.body}`).join("\n\n");
   view.innerHTML = `<div class="stack">${banner()}
     <p class="small noprint"><a href="#/child/${p.child_id}">← ${esc(c.name)}</a></p>
-    <div class="stack" style="gap:6px"><h1>${esc(p.title)}</h1><p class="muted">${esc(g.name || p.state)} · written ${nice(p.created_at.slice(0,10))}</p></div>
+    <div class="stack" style="gap:6px"><h1>${esc(p.title)}</h1><p class="muted">${esc(g.name || p.state)} · written ${nice(iso(new Date(p.created_at)))}</p></div>
     <p class="banner noprint">This is a draft. Read it through, fix anything that isn't right, and fill in any [square brackets] before you send it. ${esc(PACK_TIP[p.state] || "")}</p>
     ${ct.sections.map((x, i) => `<section class="card stack psec"><h2>${esc(x.heading)}</h2><textarea class="noprint" data-i="${i}" rows="8">${esc(x.body)}</textarea><div class="printonly ptext">${esc(x.body)}</div></section>`).join("")}
     <div class="row noprint"><button class="btn primary" type="button" id="pgSave">Save changes</button><button class="btn" type="button" id="pgCopy">Copy all text</button><button class="btn" type="button" id="pgPrint">Print or save as PDF</button><span id="pgDelArea"><button class="btn danger" type="button" id="pgDel">Delete</button></span></div>
