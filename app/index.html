@@ -168,7 +168,10 @@ if (LIVE) {
     },
     async compList(){ return must(await sb.from("comp_access").select("*").order("added_at", { ascending:false })); },
     async compAdd(email, note, expires_on){ return must(await sb.from("comp_access").upsert({ email: email.toLowerCase(), note: note || null, expires_on: expires_on || null, added_by: user?.email || null }).select().single()); },
-    async compRemove(email){ must(await sb.from("comp_access").delete().eq("email", email)); }
+    async compRemove(email){ must(await sb.from("comp_access").delete().eq("email", email)); },
+    async adminList(){ return must(await sb.rpc("admin_list")) || []; },
+    async adminAdd(email, note){ must(await sb.rpc("admin_add", { new_email: email, new_note: note || null })); },
+    async adminRemove(email){ must(await sb.rpc("admin_remove", { old_email: email })); }
   };
   sb.auth.onAuthStateChange((ev, s) => {
     if (ev === "PASSWORD_RECOVERY") { location.hash = "#/new-password"; }
@@ -476,6 +479,8 @@ async function adminView(){
   const r = await db.sb.rpc("admin_dashboard");
   if (r.error) throw new Error(r.error.message);
   const d = r.data, v = d.visits, g = d.registrations, rev = d.revenue;
+  let admins = []; try { admins = await db.adminList(); } catch(e){ admins = null; }
+  const me = (user?.email || "").toLowerCase(), OWNER = "daviesgavin@hotmail.com";
   let noTrack = false; try { noTrack = localStorage.getItem("she-no-track") === "1"; } catch(e){}
   view.innerHTML = `<div class="stack" style="gap:24px">
     <p class="small"><a href="#/">← Your family</a></p>
@@ -516,7 +521,25 @@ async function adminView(){
       </form>
       <div class="plans">${(d.comp || []).map(c => `<div class="planrow"><span><b>${esc(c.email)}</b><br><span class="muted small">${esc(c.note || "")}${c.expires_on ? ` · until ${nice(c.expires_on)}` : " · no end date"}</span></span>${c.email === (user?.email || "").toLowerCase() ? `<span class="chip">You</span>` : `<button class="btn danger small" type="button" data-rm="${esc(c.email)}">Remove</button>`}</div>`).join("") || `<p class="muted">Nobody on the list yet.</p>`}</div>
     </div>
+
+    <div class="stack" id="adminSection"><h2>Admins</h2><p class="muted">Admins can see this whole dashboard, including every family's email address and payments, and can manage both lists. Only add people you trust. They sign in with this email address like any parent, then see the Admin button.</p>
+      ${admins === null ? `<p class="muted">Run supabase/admins.sql to turn on admin management.</p>` : `
+      <form class="card stack" id="admForm" novalidate>
+        <div class="grid2"><label class="f">Email <input type="email" id="admEmail" required></label><label class="f">Note <small>Optional, e.g. "co-founder"</small><input type="text" id="admNote" maxlength="120"></label></div>
+        <p id="admMsg" role="alert" style="color:var(--bad)"></p>
+        <div><button class="btn primary" type="submit">Add admin</button></div>
+      </form>
+      <div class="plans">${admins.map(a => `<div class="planrow"><span><b>${esc(a.email)}</b><br><span class="muted small">${esc(a.note || "")}${a.added_by ? `${a.note ? " · " : ""}added by ${esc(a.added_by)}` : ""}</span></span>${a.email === OWNER ? `<span class="chip">Owner</span>` : a.email === me ? `<span class="chip">You</span>` : `<span id="admRm-${esc(a.email)}"><button class="btn danger small" type="button" data-arm="${esc(a.email)}">Remove</button></span>`}</div>`).join("")}</div>`}
+    </div>
   </div>`;
+  if ($("admForm")) $("admForm").onsubmit = async e => { e.preventDefault(); const em = $("admEmail").value.trim();
+    if (!/^\S+@\S+\.\S+$/.test(em)) { $("admMsg").textContent = "Enter a valid email address."; return; }
+    try { await db.adminAdd(em, $("admNote").value.trim()); toast("Admin added"); adminView(); } catch(err){ $("admMsg").textContent = err.message; } };
+  view.querySelectorAll("[data-arm]").forEach(b => b.onclick = () => { const em = b.dataset.arm, box = b.parentElement;
+    box.innerHTML = `<span class="small">Remove admin?</span> <button class="btn danger small" type="button">Remove</button> <button class="btn quiet small" type="button">Keep</button>`;
+    const [yes, no] = box.querySelectorAll("button");
+    no.onclick = () => adminView();
+    yes.onclick = async () => { try { await db.adminRemove(em); toast("Admin removed"); } catch(err){ toast(err.message); } adminView(); }; });
   $("refresh").onclick = adminView;
   $("noTrack").onchange = e => { try { e.target.checked ? localStorage.setItem("she-no-track", "1") : localStorage.removeItem("she-no-track"); } catch(err){} toast(e.target.checked ? "Your visits on this device won't be counted" : "Your visits will be counted"); };
   $("compForm").onsubmit = async e => { e.preventDefault(); const em = $("compEmail").value.trim();

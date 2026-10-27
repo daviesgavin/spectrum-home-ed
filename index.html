@@ -328,7 +328,15 @@ document.querySelectorAll('.tile').forEach(b=>b.addEventListener('click',()=>{
   try{if('speechSynthesis' in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-AU';u.pitch=1.4;u.rate=.9;speechSynthesis.speak(u)}}catch(e){}
 }));
 </script>
-<script>try{if(localStorage.getItem("she-admin")==="1")document.getElementById("adminLink").hidden=false}catch(e){}</script>
+<script>
+/* Show the Admin button when an admin is signed in on this device */
+(function(){var li=document.getElementById("adminLink");
+  try{if(localStorage.getItem("she-admin")==="1")li.hidden=false;
+    var raw=localStorage.getItem("sb-tisidhzgcntvsybzwhog-auth-token");if(!raw)return;var t=JSON.parse(raw);var tok=t&&(t.access_token||(t.currentSession&&t.currentSession.access_token));if(!tok)return;
+    fetch("https://tisidhzgcntvsybzwhog.supabase.co/rest/v1/rpc/my_access",{method:"POST",headers:{"Content-Type":"application/json",apikey:"sb_publishable_QouTA8MfAX-zLpK1xADbqQ_HIzL4LQK",Authorization:"Bearer "+tok},body:"{}"})
+      .then(function(r){return r.ok?r.json():null}).then(function(a){if(!a)return;li.hidden=!a.is_admin;try{a.is_admin?localStorage.setItem("she-admin","1"):localStorage.removeItem("she-admin")}catch(e){}}).catch(function(){});
+  }catch(e){}})();
+</script>
 <script src="track.js" defer></script>
 </body>
 </html>
