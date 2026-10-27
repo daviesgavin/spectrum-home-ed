@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
       metadata: { user_id: user.id },
       subscription_data: { metadata: { user_id: user.id } },
       allow_promotion_codes: true,
-      billing_address_collection: "auto",
+      billing_address_collection: "required",
       success_url: `${APP_URL}#/billing?status=success`,
       cancel_url: `${APP_URL}#/billing?status=cancelled`,
     });

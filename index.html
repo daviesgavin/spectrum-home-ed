@@ -327,5 +327,6 @@ document.querySelectorAll('.tile').forEach(b=>b.addEventListener('click',()=>{
   try{if('speechSynthesis' in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-AU';u.pitch=1.4;u.rate=.9;speechSynthesis.speak(u)}}catch(e){}
 }));
 </script>
+<script src="track.js" defer></script>
 </body>
 </html>

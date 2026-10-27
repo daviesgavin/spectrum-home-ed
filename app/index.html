@@ -251,7 +251,7 @@ function accessLabel(a){
 async function homeView(){
   const [kids, acc] = await Promise.all([db.children(), db.access()]);
   view.innerHTML = `<div class="stack">${banner()}
-    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>Your family</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span><a class="small" href="#/billing">Plans and billing</a>${acc.is_admin ? `<a class="small" href="#/admin">Admin: free access list</a>` : ""}</div>` : ""}</div><a class="btn primary" href="#/child/new">Add a child</a></div>
+    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>Your family</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span><a class="small" href="#/billing">Plans and billing</a>${acc.is_admin ? `<a class="small" href="#/admin">Admin dashboard</a>` : ""}</div>` : ""}</div><a class="btn primary" href="#/child/new">Add a child</a></div>
     ${kids.length ? `<div class="kids">${kids.map(k => `<a class="card kid" href="#/child/${k.id}">
         <div class="row" style="justify-content:space-between"><h2>${esc(k.name)}</h2><span class="chip">${esc(k.state)}</span></div>
         <p class="muted small">${age(k.birth_year) ? `Age ${age(k.birth_year)} · ` : ""}${esc(SUP[k.support_level]?.label || "")}</p>
@@ -456,21 +456,68 @@ async function billingView(){
   draw();
 }
 
+const money = c => "A$" + (Math.round(c) / 100).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function bars(rows, fmt = v => v, label = r => r.label){
+  if (!rows.length) return `<p class="muted small">No data yet.</p>`;
+  const max = Math.max(...rows.map(r => r.value), 1), W = 640, H = 160, bw = W / rows.length;
+  return `<div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H + 34}" style="width:100%;min-width:320px" role="img" aria-label="chart">
+    <line x1="0" x2="${W}" y1="${H}" y2="${H}" stroke="var(--line)"/>
+    ${rows.map((r, i) => { const h = Math.max(r.value ? 2 : 0, r.value / max * (H - 18)); const x = i * bw + bw * 0.15; return `<g><title>${esc(label(r))}: ${esc(fmt(r.value))}</title><rect x="${x}" y="${H - h}" width="${bw * 0.7}" height="${h}" rx="3" fill="var(--accent)"/>${rows.length <= 14 || i % Math.ceil(rows.length / 10) === 0 ? `<text x="${x + bw * 0.35}" y="${H + 16}" text-anchor="middle" font-size="11" fill="var(--muted)">${esc(label(r))}</text>` : ""}${rows.length <= 14 && r.value ? `<text x="${x + bw * 0.35}" y="${H - h - 4}" text-anchor="middle" font-size="11" fill="var(--ink)">${esc(fmt(r.value))}</text>` : ""}</g>`; }).join("")}
+  </svg></div>`;
+}
+function fillDays(list, days = 30){ const m = Object.fromEntries((list || []).map(d => [d.day, d.n])); const out = []; for (let i = days - 1; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const k = iso(d); out.push({ label: `${d.getDate()}/${d.getMonth() + 1}`, value: m[k] || 0 }); } return out; }
+const tbl = (head, rows) => rows.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:15px"><thead><tr>${head.map(h => `<th style="text-align:left;padding:8px;border-bottom:1px solid var(--line);color:var(--muted)">${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td style="padding:8px;border-bottom:1px solid var(--line)">${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : `<p class="muted small">Nothing yet.</p>`;
+const kpi = (label, value, sub = "") => `<div class="card" style="padding:14px"><p class="small muted">${label}</p><p style="font-family:var(--display);font-size:28px;font-weight:800;font-variant-numeric:tabular-nums">${value}</p>${sub ? `<p class="small muted">${sub}</p>` : ""}</div>`;
+
 async function adminView(){
   const acc = await db.access();
   if (!acc.is_admin) { view.innerHTML = `<div class="card stack"><h2>Admins only</h2><p><a href="#/">Back to your family</a></p></div>`; return; }
-  const list = await db.compList();
-  view.innerHTML = `<div class="stack">
+  const r = await db.sb.rpc("admin_dashboard");
+  if (r.error) throw new Error(r.error.message);
+  const d = r.data, v = d.visits, g = d.registrations, rev = d.revenue;
+  let noTrack = false; try { noTrack = localStorage.getItem("she-no-track") === "1"; } catch(e){}
+  view.innerHTML = `<div class="stack" style="gap:24px">
     <p class="small"><a href="#/">← Your family</a></p>
-    <div class="stack" style="gap:6px"><h1>Free access list</h1><p class="muted">People on this list never pay and get unlimited AI plans. They need to sign up with exactly this email address.</p></div>
-    <form class="card stack" id="compForm" novalidate>
-      <div class="grid2"><label class="f">Email <input type="email" id="compEmail" required></label><label class="f">Note <small>Optional, e.g. "beta tester", "therapist"</small><input type="text" id="compNote" maxlength="120"></label></div>
-      <label class="f">Free until <small>Optional. Leave empty for no end date.</small><input type="date" id="compExp"></label>
-      <p id="compMsg" role="alert" style="color:var(--bad)"></p>
-      <div><button class="btn primary" type="submit">Add to free list</button></div>
-    </form>
-    <div class="plans">${list.map(c => `<div class="planrow"><span><b>${esc(c.email)}</b><br><span class="muted small">${esc(c.note || "")}${c.expires_on ? ` · until ${nice(c.expires_on)}` : " · no end date"}</span></span>${c.email === (user?.email || "").toLowerCase() ? `<span class="chip">You</span>` : `<button class="btn danger small" type="button" data-rm="${esc(c.email)}">Remove</button>`}</div>`).join("") || `<p class="muted">Nobody on the list yet.</p>`}</div>
+    <div class="row" style="justify-content:space-between"><h1>Admin dashboard</h1><button class="btn quiet small" type="button" id="refresh">Refresh</button></div>
+
+    <div class="stack"><h2>Money</h2><p class="small muted">Paid invoices from Stripe. Currently test mode.</p>
+      <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${kpi("Last 7 days", money(rev.week))}${kpi("Last 30 days", money(rev.month))}${kpi("Last 12 months", money(rev.year))}${kpi("Paying families", d.paying)}</div>
+      <div class="card stack"><h3>Revenue by month</h3>${bars((rev.by_month || []).map(m => ({ label: m.month.slice(5) + "/" + m.month.slice(2, 4), value: m.cents })), money)}</div>
+    </div>
+
+    <div class="stack"><h2>Visits</h2><p class="small muted">Location is estimated from each visitor's time zone. No IP addresses are stored.</p>
+      <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${kpi("Today", v.today)}${kpi("Last 7 days", v.week)}${kpi("Last 30 days", v.month, `${v.unique_month} unique visitors`)}${kpi("Last 12 months", v.year)}</div>
+      <div class="card stack"><h3>Visits per day, last 30 days</h3>${bars(fillDays(v.by_day))}</div>
+      <div class="grid2">
+        <div class="card stack"><h3>Top cities (30 days)</h3>${tbl(["City", "Country", "Visits"], (v.by_place || []).map(p => [esc(p.city), esc(p.country), p.n]))}</div>
+        <div class="card stack"><h3>Countries (30 days)</h3>${tbl(["Country", "Visits"], (v.by_country || []).map(p => [esc(p.country), p.n]))}<h3 style="margin-top:12px">Top pages</h3>${tbl(["Page", "Visits"], (v.by_page || []).map(p => [esc(p.path), p.n]))}</div>
+      </div>
+      <label class="row small"><input type="checkbox" id="noTrack" ${noTrack ? "checked" : ""}> Don't count my own visits on this device</label>
+    </div>
+
+    <div class="stack"><h2>Registrations</h2>
+      <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${kpi("Total accounts", g.total)}${kpi("Last 7 days", g.week)}${kpi("Last 30 days", g.month)}</div>
+      <div class="card stack"><h3>Sign-ups per day, last 30 days</h3>${bars(fillDays(g.by_day))}</div>
+      <div class="card stack"><h3>Newest accounts</h3>${tbl(["Email", "Joined", "Children", "Plans"], (g.recent || []).map(u => [esc(u.email), nice(u.created_at.slice(0, 10)), u.children, u.plans]))}</div>
+    </div>
+
+    <div class="stack"><h2>Paying customers</h2>
+      <div class="card stack">${tbl(["Email", "Plan", "Status", "Location", "Renews"], (d.customers || []).map(c => [esc(c.email || "—"), esc(c.plan === "plus" ? "Family Plus" : c.plan === "family" ? "Family" : (c.plan || "—")), esc(c.status), esc([c.city, c.state, c.country].filter(Boolean).join(", ") || "—"), c.current_period_end ? nice(c.current_period_end.slice(0, 10)) : "—"]))}</div>
+      <div class="card stack"><h3>Revenue by location</h3>${tbl(["State", "Country", "Customers", "Revenue"], (rev.by_place || []).map(p => [esc(p.state || "—"), esc(p.country), p.customers, money(p.cents)]))}</div>
+    </div>
+
+    <div class="stack" id="compSection"><h2>Free access list</h2><p class="muted">People on this list never pay and get unlimited AI plans. They need to sign up with exactly this email address.</p>
+      <form class="card stack" id="compForm" novalidate>
+        <div class="grid2"><label class="f">Email <input type="email" id="compEmail" required></label><label class="f">Note <small>Optional, e.g. "beta tester", "therapist"</small><input type="text" id="compNote" maxlength="120"></label></div>
+        <label class="f">Free until <small>Optional. Leave empty for no end date.</small><input type="date" id="compExp"></label>
+        <p id="compMsg" role="alert" style="color:var(--bad)"></p>
+        <div><button class="btn primary" type="submit">Add to free list</button></div>
+      </form>
+      <div class="plans">${(d.comp || []).map(c => `<div class="planrow"><span><b>${esc(c.email)}</b><br><span class="muted small">${esc(c.note || "")}${c.expires_on ? ` · until ${nice(c.expires_on)}` : " · no end date"}</span></span>${c.email === (user?.email || "").toLowerCase() ? `<span class="chip">You</span>` : `<button class="btn danger small" type="button" data-rm="${esc(c.email)}">Remove</button>`}</div>`).join("") || `<p class="muted">Nobody on the list yet.</p>`}</div>
+    </div>
   </div>`;
+  $("refresh").onclick = adminView;
+  $("noTrack").onchange = e => { try { e.target.checked ? localStorage.setItem("she-no-track", "1") : localStorage.removeItem("she-no-track"); } catch(err){} toast(e.target.checked ? "Your visits on this device won't be counted" : "Your visits will be counted"); };
   $("compForm").onsubmit = async e => { e.preventDefault(); const em = $("compEmail").value.trim();
     if (!/^\S+@\S+\.\S+$/.test(em)) { $("compMsg").textContent = "Enter a valid email address."; return; }
     try { await db.compAdd(em, $("compNote").value.trim(), $("compExp").value); toast("Added to the free list"); adminView(); } catch(err){ $("compMsg").textContent = err.message; } };
@@ -502,5 +549,6 @@ window.addEventListener("hashchange", route);
 route();
 })();
 </script>
+<script src="../track.js" defer></script>
 </body>
 </html>
