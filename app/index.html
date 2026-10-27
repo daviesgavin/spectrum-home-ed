@@ -152,9 +152,17 @@ if (LIVE) {
     async log(planId, key, rating, note){ return must(await sb.from("lesson_logs").upsert({ plan_id: planId, lesson_key: key, rating, note }, { onConflict:"plan_id,lesson_key" }).select().single()); },
     async generate(child, week, focus, extra){
       const r = await sb.functions.invoke("generate-plan", { body:{ child_id: child.id, week_start: week, focus, extra } });
-      if (r.error) { let msg = r.error.message; try { const b = await r.error.context.json(); if (b.error) msg = b.error; } catch(e){} throw new Error(msg); }
+      if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
       return r.data.plan;
-    }
+    },
+    async generateTemplate(child, week, focus){
+      const content = window.SHE_demoPlan(child, week, focus);
+      return must(await sb.from("plans").insert({ child_id: child.id, week_start: week, title: content.title, content, source: "demo" }).select().single());
+    },
+    async access(){ const r = await sb.rpc("my_access"); return r.error ? {} : r.data; },
+    async compList(){ return must(await sb.from("comp_access").select("*").order("added_at", { ascending:false })); },
+    async compAdd(email, note, expires_on){ return must(await sb.from("comp_access").upsert({ email: email.toLowerCase(), note: note || null, expires_on: expires_on || null, added_by: user?.email || null }).select().single()); },
+    async compRemove(email){ must(await sb.from("comp_access").delete().eq("email", email)); }
   };
   sb.auth.onAuthStateChange((ev, s) => {
     if (ev === "PASSWORD_RECOVERY") { location.hash = "#/new-password"; }
@@ -178,6 +186,8 @@ if (LIVE) {
     async deletePlan(id){ const d = load(); d.plans = d.plans.filter(x => x.id !== id); d.logs = d.logs.filter(l => l.plan_id !== id); save(d); },
     async logs(planId){ return load().logs.filter(l => l.plan_id === planId); },
     async log(planId, key, rating, note){ const d = load(); let l = d.logs.find(x => x.plan_id === planId && x.lesson_key === key); if (!l) { l = { id: uuid(), plan_id: planId, lesson_key: key }; d.logs.push(l); } l.rating = rating; l.note = note; save(d); return l; },
+    async access(){ return { comp: true }; },
+    async generateTemplate(child, week, focus){ return this.generate(child, week, focus); },
     async generate(child, week, focus){ await new Promise(r => setTimeout(r, 900)); const content = window.SHE_demoPlan(child, week, focus); const d = load(); const p = { id: uuid(), child_id: child.id, week_start: week, title: content.title, content, source: "demo", created_at: new Date().toISOString() }; d.plans.push(p); save(d); return p; }
   };
 }
@@ -225,10 +235,16 @@ function newPasswordView(){
   $("npForm").onsubmit = async e => { e.preventDefault(); const p = $("npPass").value; if (p.length < 8) { $("npMsg").textContent = "Passwords need at least 8 characters."; return; } try { await db.newPassword(p); toast("Password saved"); location.hash = "#/"; } catch(err){ $("npMsg").textContent = err.message; } };
 }
 
+function accessLabel(a){
+  if (a.is_admin && a.comp) return "Admin · free access";
+  if (a.comp) return "Free access";
+  if (a.subscribed) return "Subscribed";
+  return (a.ai_plans_used || 0) >= 1 ? "Free plan · template plans" : "Free plan · 1 AI starter week included";
+}
 async function homeView(){
-  const kids = await db.children();
+  const [kids, acc] = await Promise.all([db.children(), db.access()]);
   view.innerHTML = `<div class="stack">${banner()}
-    <div class="row" style="justify-content:space-between"><h1>Your family</h1><a class="btn primary" href="#/child/new">Add a child</a></div>
+    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>Your family</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span>${acc.is_admin ? `<a class="small" href="#/admin">Admin: free access list</a>` : ""}</div>` : ""}</div><a class="btn primary" href="#/child/new">Add a child</a></div>
     ${kids.length ? `<div class="kids">${kids.map(k => `<a class="card kid" href="#/child/${k.id}">
         <div class="row" style="justify-content:space-between"><h2>${esc(k.name)}</h2><span class="chip">${esc(k.state)}</span></div>
         <p class="muted small">${age(k.birth_year) ? `Age ${age(k.birth_year)} · ` : ""}${esc(SUP[k.support_level]?.label || "")}</p>
@@ -312,7 +328,13 @@ async function childView(id){
     e.preventDefault(); const week = $("gWeek").value; if (!week) return;
     $("gGo").disabled = true; $("gWait").hidden = false; $("gMsg").textContent = "";
     try { const p = await db.generate(c, week, $("gFocus").value.trim(), $("gExtra").value.trim()); location.hash = `#/plan/${p.id}`; }
-    catch(err){ $("gMsg").textContent = err.message; $("gGo").disabled = false; $("gWait").hidden = true; }
+    catch(err){
+      $("gGo").disabled = false; $("gWait").hidden = true;
+      if (err.code === "upgrade") {
+        $("gMsg").innerHTML = `<span style="color:var(--ink)">${esc(err.message)}</span> <button class="btn small" type="button" id="gTpl">Create a free template plan</button>`;
+        $("gTpl").onclick = async () => { const p = await db.generateTemplate(c, week, $("gFocus").value.trim()); location.hash = `#/plan/${p.id}`; };
+      } else $("gMsg").textContent = err.message;
+    }
   };
 }
 
@@ -378,6 +400,27 @@ function editLesson(article, ct, d, k, planId, dayIdx){
     await db.savePlanContent(planId, ct); toast("Lesson saved"); planView(planId, dayIdx); };
 }
 
+async function adminView(){
+  const acc = await db.access();
+  if (!acc.is_admin) { view.innerHTML = `<div class="card stack"><h2>Admins only</h2><p><a href="#/">Back to your family</a></p></div>`; return; }
+  const list = await db.compList();
+  view.innerHTML = `<div class="stack">
+    <p class="small"><a href="#/">← Your family</a></p>
+    <div class="stack" style="gap:6px"><h1>Free access list</h1><p class="muted">People on this list never pay and get unlimited AI plans. They need to sign up with exactly this email address.</p></div>
+    <form class="card stack" id="compForm" novalidate>
+      <div class="grid2"><label class="f">Email <input type="email" id="compEmail" required></label><label class="f">Note <small>Optional, e.g. "beta tester", "therapist"</small><input type="text" id="compNote" maxlength="120"></label></div>
+      <label class="f">Free until <small>Optional. Leave empty for no end date.</small><input type="date" id="compExp"></label>
+      <p id="compMsg" role="alert" style="color:var(--bad)"></p>
+      <div><button class="btn primary" type="submit">Add to free list</button></div>
+    </form>
+    <div class="plans">${list.map(c => `<div class="planrow"><span><b>${esc(c.email)}</b><br><span class="muted small">${esc(c.note || "")}${c.expires_on ? ` · until ${nice(c.expires_on)}` : " · no end date"}</span></span>${c.email === (user?.email || "").toLowerCase() ? `<span class="chip">You</span>` : `<button class="btn danger small" type="button" data-rm="${esc(c.email)}">Remove</button>`}</div>`).join("") || `<p class="muted">Nobody on the list yet.</p>`}</div>
+  </div>`;
+  $("compForm").onsubmit = async e => { e.preventDefault(); const em = $("compEmail").value.trim();
+    if (!/^\S+@\S+\.\S+$/.test(em)) { $("compMsg").textContent = "Enter a valid email address."; return; }
+    try { await db.compAdd(em, $("compNote").value.trim(), $("compExp").value); toast("Added to the free list"); adminView(); } catch(err){ $("compMsg").textContent = err.message; } };
+  view.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => { await db.compRemove(b.dataset.rm); toast("Removed"); adminView(); });
+}
+
 /* ---------- router ---------- */
 async function route(){
   const h = location.hash.replace(/^#/, "") || "/";
@@ -390,6 +433,7 @@ async function route(){
   window.scrollTo(0, 0);
   let m;
   if (h === "/" || h === "/signin" || h === "/signup") return guard(homeView);
+  if (h === "/admin" && LIVE) return guard(adminView);
   if (h === "/child/new") return guard(() => childFormView());
   if ((m = h.match(/^\/child\/([\w-]+)\/edit$/))) return guard(() => childFormView(m[1]));
   if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));

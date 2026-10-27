@@ -98,6 +98,14 @@ Deno.serve(async (req) => {
   const { data: child, error: childErr } = await userClient.from("children").select("*").eq("id", child_id).single();
   if (childErr || !child) return json({ error: "Child not found." }, 404);
 
+  // Access: free-list emails, admins and subscribers get unlimited AI plans; everyone else gets a free starter allowance
+  const { data: access } = await userClient.rpc("my_access");
+  const unlimited = !!(access?.comp || access?.subscribed || access?.is_admin);
+  const freeAllowance = Number(Deno.env.get("FREE_AI_PLANS") ?? "1");
+  if (!unlimited && Number(access?.ai_plans_used ?? 0) >= freeAllowance) {
+    return json({ error: "Your free starter plan has been used. Subscribe for unlimited personalised plans, or create a free template plan.", code: "upgrade" }, 402);
+  }
+
   const limit = Number(Deno.env.get("DAILY_PLAN_LIMIT") ?? "10");
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const { count } = await admin.from("generations").select("id", { count: "exact", head: true }).eq("parent_id", user.id).gte("created_at", since);

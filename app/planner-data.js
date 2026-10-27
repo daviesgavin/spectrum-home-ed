@@ -87,7 +87,7 @@ window.SHE_SUPPORT = {
     });
     return {
       title: `${child.name}'s week: ${interests.slice(0, 2).join(" and ")}`,
-      summary: `A ${DAYS.length}-day plan built around ${interests.slice(0, 3).join(", ")}, covering every ${fw.name} learning area. This is a demo plan; the AI planner writes a fully personalised one once it's connected.`,
+      summary: `A ${DAYS.length}-day plan built around ${interests.slice(0, 3).join(", ")}, covering every ${fw.name} learning area. This is a template plan. Subscribers get a fully personalised plan written by our AI planner.`,
       focus_goals: [focus || "Communicate wants and needs", "Join in short shared activities", "Build daily living routines"],
       days, framework: fw.name, areas: fw.areas
     };
