@@ -119,6 +119,7 @@ textarea{min-height:72px;resize:vertical}
   <div class="navr" id="acct" hidden><span id="acctEmail"></span><button class="btn quiet small" id="signOut">Sign out</button></div>
 </div></header>
 <main><div class="wrap" id="view" aria-live="polite"></div></main>
+<footer class="wrap noprint" style="padding-block:28px 40px;font-size:14px;color:var(--muted)"><a href="../terms.html">Terms of Use</a> · <a href="../privacy.html">Privacy Policy</a> · <a href="mailto:hello@spectrumhomeed.com">hello@spectrumhomeed.com</a></footer>
 <div class="toast" id="toast" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
@@ -274,6 +275,7 @@ function authView(mode = "in"){
       <label class="f">Email <input type="email" id="aEmail" autocomplete="email" required></label>
       ${mode !== "reset" ? `<label class="f">Password <small>At least 8 characters</small><input type="password" id="aPass" autocomplete="${mode === "up" ? "new-password" : "current-password"}" minlength="8" required></label>` : ""}
       <p class="small" id="aMsg" role="alert"></p>
+      ${mode === "up" ? `<p class="small muted">By creating an account you agree to our <a href="../terms.html" target="_blank" rel="noopener">Terms of Use</a> and <a href="../privacy.html" target="_blank" rel="noopener">Privacy Policy</a>, and confirm you're 18 or over.</p>` : ""}
       <button class="btn primary" type="submit" id="aGo">${mode === "up" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}</button>
     </form>
     <p class="row small">${mode === "in" ? `<a href="#/signup">Create an account</a> · <a href="#/reset">Forgot password?</a>` : `<a href="#/signin">I already have an account</a>`}</p>
@@ -471,7 +473,7 @@ async function planView(id, dayIdx = 0){
         catch(err){ msg.textContent = err.message; }
       };
       if (c.media_consent_at) return go();
-      msg.innerHTML = `<span class="confirm" style="display:block">Photos and videos of ${esc(c.name)} are stored privately on Australian servers. Only you can see them, unless you choose to share a report. You can delete any of them at any time, and deleting ${esc(c.name)}'s profile deletes them all. Photos are shrunk and their location data is removed before upload.<br><span class="row" style="margin-top:8px"><button class="btn primary small" type="button" data-ok>I agree, save it</button><button class="btn quiet small" type="button" data-no>Not now</button></span></span>`;
+      msg.innerHTML = `<span class="confirm" style="display:block">Photos and videos of ${esc(c.name)} are stored privately on Australian servers. Only you can see them, unless you choose to share a report. You can delete any of them at any time, and deleting ${esc(c.name)}'s profile deletes them all. Photos are shrunk and their location data is removed before upload. <a href="../privacy.html#children" target="_blank" rel="noopener">Privacy Policy</a><br><span class="row" style="margin-top:8px"><button class="btn primary small" type="button" data-ok>I agree, save it</button><button class="btn quiet small" type="button" data-no>Not now</button></span></span>`;
       msg.querySelector("[data-no]").onclick = () => { msg.textContent = ""; };
       msg.querySelector("[data-ok]").onclick = async () => { try { await db.setMediaConsent(c.id); c.media_consent_at = new Date().toISOString(); go(); } catch(err){ msg.textContent = err.message; } };
     };
