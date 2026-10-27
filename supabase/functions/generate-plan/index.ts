@@ -59,24 +59,40 @@ function extractJson(text: string) {
   return JSON.parse(text.slice(start, end + 1));
 }
 
+// Models sometimes return arrays as JSON strings, or wrap the object in an extra key. Accept both.
+function arr(v: unknown): any[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (t.startsWith("[")) { try { const p = JSON.parse(t); if (Array.isArray(p)) return p; } catch { /* ignore */ } }
+    return t ? t.split(/\n+|;\s*/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-*•])\s*/, "").trim()).filter(Boolean) : [];
+  }
+  return [];
+}
+function obj(v: any): any {
+  if (typeof v === "string") { try { v = JSON.parse(v); } catch { return {}; } }
+  if (v && typeof v === "object" && !Array.isArray(v) && !("lessons" in v) && !("title" in v) && Object.keys(v).length === 1) return obj(Object.values(v)[0]);
+  return v ?? {};
+}
+
 function clean(plan: any, areas: string[]) {
   const asStr = (v: unknown, max = 600) => (typeof v === "string" ? v.slice(0, max) : "");
-  const days = Array.isArray(plan?.days) ? plan.days.slice(0, 7) : [];
+  const days = arr(plan?.days).map(obj).slice(0, 7);
   return {
     title: asStr(plan?.title, 120) || "Weekly plan",
     summary: asStr(plan?.summary, 800),
-    focus_goals: (Array.isArray(plan?.focus_goals) ? plan.focus_goals : []).map((g: unknown) => asStr(g, 200)).filter(Boolean).slice(0, 6),
+    focus_goals: arr(plan?.focus_goals).map((g: unknown) => asStr(g, 200)).filter(Boolean).slice(0, 6),
     days: days.map((d: any) => ({
       day: asStr(d?.day, 20),
       regulation: asStr(d?.regulation, 300),
-      lessons: (Array.isArray(d?.lessons) ? d.lessons : []).slice(0, 12).map((l: any) => ({
+      lessons: arr(d?.lessons).map(obj).slice(0, 12).map((l: any) => ({
         title: asStr(l?.title, 120),
-        areas: (Array.isArray(l?.areas) ? l.areas : []).filter((a: unknown) => typeof a === "string" && areas.includes(a)).slice(0, 3),
+        areas: arr(l?.areas).filter((a: unknown) => typeof a === "string" && areas.includes(a)).slice(0, 3),
         minutes: Math.max(3, Math.min(120, Number(l?.minutes) || 10)),
         goal: asStr(l?.goal, 300),
         hook: asStr(l?.hook, 300),
         materials: asStr(l?.materials, 300),
-        steps: (Array.isArray(l?.steps) ? l.steps : []).map((s: unknown) => asStr(s, 300)).filter(Boolean).slice(0, 8),
+        steps: arr(l?.steps).map((s: unknown) => asStr(s, 300)).filter(Boolean).slice(0, 8),
         communication: asStr(l?.communication, 300),
         adjustments: asStr(l?.adjustments, 300),
         evidence: asStr(l?.evidence, 200),
@@ -221,7 +237,8 @@ Give this week's plan (starting ${week_start}) a short title, a two-sentence sum
     console.error("Generation failed", e);
     return json({ error: "The lesson planner had a problem. Please try again in a minute." }, 502);
   }
-  const plan = clean({ ...overview, days: dayResults.map((d, i) => ({ day: DAYS[i], ...d })) }, fw.areas);
+  const plan = clean({ ...obj(overview), days: dayResults.map((d, i) => ({ day: DAYS[i], ...obj(d) })) }, fw.areas);
+  if (!plan.days.some((d: any) => d.lessons.length)) console.error("Empty plan; sample day output:", JSON.stringify(dayResults[0]).slice(0, 800));
   if (!plan.days.some((d: any) => d.lessons.length)) return json({ error: "The plan came back empty. Please try again." }, 502);
 
   await admin.from("generations").insert({ parent_id: user.id });
