@@ -179,15 +179,17 @@ ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
         headers: { "x-api-key": apiKey!, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
           model, max_tokens: maxTokens, system,
-          tools: [{ name, description: "Save the result", input_schema: schema }],
-          tool_choice: { type: "tool", name },
-          messages: [{ role: "user", content: prompt }],
+          tools: [{ name, description: "Save the result. Always call this tool exactly once with the complete result.", input_schema: schema }],
+          tool_choice: { type: "auto" },
+          messages: [{ role: "user", content: `${prompt}\n\nReply by calling the ${name} tool once with the complete result. Do not reply with text.` }],
         }),
       });
       if (!resp.ok) { console.error("Anthropic error", resp.status, (await resp.text()).slice(0, 500)); continue; }
       const out = await resp.json();
       const use = (out.content ?? []).find((c: any) => c.type === "tool_use");
       if (use?.input) return use.input;
+      const text = (out.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
+      try { return extractJson(text); } catch { /* fall through */ }
       console.error("No tool output", out.stop_reason, JSON.stringify(out.content ?? []).slice(0, 300));
     }
     throw new Error("planner failed");
