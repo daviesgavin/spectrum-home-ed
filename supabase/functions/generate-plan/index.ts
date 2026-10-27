@@ -135,58 +135,92 @@ Deno.serve(async (req) => {
 
   const system = `You write home education lesson plans for Australian parents of autistic, nonverbal and other special-needs children.
 Principles: interest-led (use the child's favourite things as the hook in nearly every lesson), regulation before learning, communication in every lesson (respect AAC, signs, gestalt scripts as real language), short realistic sessions, real life counts as learning (shops, cooking, outings), success is participation.
-Write in plain Australian English for a tired parent: short sentences, concrete steps, no jargon. Never use the child's interests in a way that mocks them. Keep it safe: adult supervision for water, heat, knives and outings.
-Return ONLY valid JSON, no markdown.`;
+Write in plain Australian English for a tired parent: short sentences, concrete steps, no jargon. Never use the child's interests in a way that mocks them. Keep it safe: adult supervision for water, heat, knives and outings.`;
 
-  const user_prompt = `Child profile
+  const interests: string[] = (child.interests || []).length ? child.interests : ["their favourite things"];
+  const profile = `Child profile
 - Name: ${child.name}
 - Age: ${age ?? "unknown"}
 - State: ${child.state}; framework: ${fw.name}; regulator: ${fw.regulator}
 - Support level: ${SUPPORT[child.support_level] ?? child.support_level}
 - Communication: ${child.communication || "not stated"}
-- Interests: ${(child.interests || []).join(", ") || "not stated"}
+- Interests: ${interests.join(", ")}
 - Sensory notes: ${child.sensory_notes || "none"}
 - Parent's goals: ${child.goals || "none"}
 - Learning time: about ${minutes} minutes a day${adjusted ? ` (reduced by the parent: ${child.time_reason || "no reason given"})` : ` (recommended for ${rec.stage.toLowerCase()} age)`}
 ${focus ? `- Focus this week: ${String(focus).slice(0, 300)}` : ""}
-${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}
+${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
 
-Write a Monday to Friday plan for the week starting ${week_start}.
-- Each day's lessons should add up to about ${minutes} minutes.
-- Mix two kinds of lesson: short focused lessons sized to the child's attention span, and longer hands-on learning (cooking, shopping trips, swimming, gardening, music, art, life skills) that counts toward the day's time. For high support learners most of the time will be hands-on.
-- Use these exact learning area names: ${fw.areas.join("; ")}. Every area must appear during the week.
-${targets ? `- Weekly minutes to aim for in each area (a lesson's minutes are shared equally between the areas it lists): ${Object.entries(targets).map(([a, m]) => `${a} ${m}`).join("; ")}.` : "- Share the time sensibly across the areas, with the most time on English and Mathematics."}
-- Keep every text field short: steps of one sentence, 3-5 steps per lesson.
-- Each lesson lists 1 to 3 of those learning areas.
-- Pitch goals at the child's real level, not their age.
+  const str = { type: "string" };
+  const lessonSchema = {
+    type: "object",
+    properties: {
+      title: str,
+      areas: { type: "array", items: { type: "string", enum: fw.areas }, minItems: 1, maxItems: 3 },
+      minutes: { type: "integer" },
+      goal: { ...str, description: "One observable skill" },
+      hook: { ...str, description: "How the child's interest is used" },
+      materials: str,
+      steps: { type: "array", items: str, minItems: 3, maxItems: 5 },
+      communication: { ...str, description: "Phrase, sign or AAC word to model" },
+      adjustments: str,
+      evidence: { ...str, description: "What to photo, video or record" },
+    },
+    required: ["title", "areas", "minutes", "goal", "hook", "steps", "communication", "adjustments", "evidence"],
+  };
+  const daySchema = { type: "object", properties: { regulation: { ...str, description: "One sensory or movement suggestion for the day" }, lessons: { type: "array", items: lessonSchema } }, required: ["regulation", "lessons"] };
+  const overviewSchema = { type: "object", properties: { title: str, summary: { ...str, description: "Two sentences" }, focus_goals: { type: "array", items: str, minItems: 3, maxItems: 5 } }, required: ["title", "summary", "focus_goals"] };
 
-JSON shape:
-{"title": string, "summary": string (2 sentences), "focus_goals": [string, 3-5 items],
- "days": [{"day": "Monday", "regulation": string (one sensory or movement suggestion for the day),
-   "lessons": [{"title": string, "areas": [string], "minutes": number, "goal": string (one observable skill), "hook": string, "materials": string,
-     "steps": [string, 3-6 items], "communication": string (phrase, sign or AAC word to model), "adjustments": string, "evidence": string (what to photo, video or record)}]}]}`;
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({
-      model: Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5",
-      max_tokens: 16000,
-      system,
-      messages: [{ role: "user", content: user_prompt }],
-    }),
-  });
-  if (!resp.ok) {
-    console.error("Anthropic error", resp.status, await resp.text());
-    return json({ error: "The lesson planner is busy. Please try again in a minute." }, 502);
+  const model = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5";
+  async function callTool(prompt: string, name: string, schema: unknown, maxTokens: number) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": apiKey!, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model, max_tokens: maxTokens, system,
+          tools: [{ name, description: "Save the result", input_schema: schema }],
+          tool_choice: { type: "tool", name },
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!resp.ok) { console.error("Anthropic error", resp.status, (await resp.text()).slice(0, 500)); continue; }
+      const out = await resp.json();
+      const use = (out.content ?? []).find((c: any) => c.type === "tool_use");
+      if (use?.input) return use.input;
+      console.error("No tool output", out.stop_reason, JSON.stringify(out.content ?? []).slice(0, 300));
+    }
+    throw new Error("planner failed");
   }
-  const out = await resp.json();
-  const text = (out.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
 
-  let plan;
-  try { plan = clean(extractJson(text), fw.areas); }
-  catch (e) { console.error("Parse error", e, text.slice(0, 500)); return json({ error: "The plan came back in the wrong format. Please try again." }, 502); }
-  if (!plan.days.length) return json({ error: "The plan came back empty. Please try again." }, 502);
+  const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  const dayTargets = targets ? Object.entries(targets).map(([a, m]) => `${a} ${Math.round(m / 5)}`).join("; ") : null;
+  const dayPrompt = (i: number) => `${profile}
+
+Write ${DAYS[i]}'s lessons for the week starting ${week_start} (day ${i + 1} of 5).
+- Lessons should add up to about ${minutes} minutes.
+- Mix short focused lessons sized to the child's attention span with longer hands-on learning (cooking, shopping trips, swimming, gardening, music, art, life skills) that counts toward the time. For high support learners most of the time is hands-on.
+- Feature these interests most today, so the week has variety: ${interests[i % interests.length]}${interests.length > 1 ? `, ${interests[(i + 1) % interests.length]}` : ""}.
+- Day themes to avoid repeating across the week: Monday home and routines, Tuesday community and shopping, Wednesday science and nature, Thursday arts and music, Friday fun day and outings.
+${dayTargets ? `- Minutes to aim for today in each learning area (a lesson's minutes are shared between its areas): ${dayTargets}.` : `- Cover several learning areas today, with the most time on ${fw.areas[0]} and ${fw.areas[1]}.`}
+- Each lesson lists 1 to 3 learning areas. Pitch goals at the child's real level, not their age.
+- Keep text short: one-sentence steps, 3-5 steps per lesson.`;
+  const overviewPrompt = `${profile}
+
+Give this week's plan (starting ${week_start}) a short title, a two-sentence summary for the parent, and 3-5 focus goals for the week, written as observable skills at the child's real level.`;
+
+  let overview: any, dayResults: any[];
+  try {
+    [overview, ...dayResults] = await Promise.all([
+      callTool(overviewPrompt, "save_overview", overviewSchema, 1000),
+      ...DAYS.map((_, i) => callTool(dayPrompt(i), "save_day", daySchema, 6000)),
+    ]);
+  } catch (e) {
+    console.error("Generation failed", e);
+    return json({ error: "The lesson planner had a problem. Please try again in a minute." }, 502);
+  }
+  const plan = clean({ ...overview, days: dayResults.map((d, i) => ({ day: DAYS[i], ...d })) }, fw.areas);
+  if (!plan.days.some((d: any) => d.lessons.length)) return json({ error: "The plan came back empty. Please try again." }, 502);
 
   await admin.from("generations").insert({ parent_id: user.id });
 
