@@ -84,6 +84,19 @@ textarea{min-height:72px;resize:vertical}
 @media (max-width:560px){.lesson dl{grid-template-columns:1fr}.lesson dt{margin-top:6px}}
 .hpi{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ev{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
+.reqcard{text-decoration:none;color:inherit}
+.dues{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.due{padding:8px 10px;border-radius:10px;background:var(--bg);border-left:4px solid var(--line)}
+.due.soon{border-left-color:#d99a2b}
+.due.late{border-left-color:var(--bad)}
+.steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.step.done{opacity:.75}
+.step p{margin:0;max-width:70ch}
+.tick{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.tick input{width:22px;height:22px;flex:none;margin-top:2px}
+.apphelp{background:var(--bg);border-radius:10px;padding:8px 10px;color:var(--accent);font-weight:700}
+.links{margin:0;padding-left:20px}
 .evi{position:relative;margin:0;width:96px;height:96px;border-radius:12px;overflow:hidden;background:var(--bg);border:1px solid var(--line)}
 .evi img,.evi video{width:100%;height:100%;object-fit:cover;display:block}
 .evi video{background:#000}
@@ -125,6 +138,7 @@ textarea{min-height:72px;resize:vertical}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
 <script src="planner-data.js"></script>
+<script src="state-guides.js"></script>
 <script>
 (() => {
 const C = window.SHE_CONFIG || {};
@@ -260,6 +274,9 @@ if (LIVE) {
 const age = y => y ? (new Date().getFullYear() - y) : null;
 function mondayOf(dt){ const d = new Date(dt); const day = d.getDay(); const diff = day === 0 ? 1 : (day === 1 ? 0 : 8 - day); d.setDate(d.getDate() + diff); return d; }
 const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const daysTo = d => Math.round((new Date(d).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 864e5);
+const whenTxt = d => { const n = daysTo(d); return n < 0 ? `${-n} day${n === -1 ? "" : "s"} overdue` : n === 0 ? "today" : n <= 60 ? `in ${n} day${n === 1 ? "" : "s"}` : `by ${d.toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" })}`; };
+const dueRow = d => { const n = daysTo(d.due), cls = d.info ? "" : n < 0 ? "late" : n <= 30 ? "soon" : ""; return `<li class="due ${cls}"><b>${esc(d.title)}</b> <span class="muted">${d.info ? d.due.toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" }) : whenTxt(d.due)}</span></li>`; };
 const nice = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d).toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" }); };
 function coverage(content){ const areas = content.areas || []; const n = Object.fromEntries(areas.map(a => [a, 0])); (content.days||[]).forEach(d => (d.lessons||[]).forEach(l => { const as = (l.areas||[]).filter(a => a in n); as.forEach(a => n[a] += (l.minutes || 0) / as.length); })); return n; }
 const hm = m => { m = Math.round(m); const h = Math.floor(m / 60), r = m % 60; return h ? `${h}h${r ? ` ${r}m` : ""}` : `${r}m`; };
@@ -316,6 +333,7 @@ async function homeView(){
         <div class="row" style="justify-content:space-between"><h2>${esc(k.name)}</h2><span class="chip">${esc(k.state)}</span></div>
         <p class="muted small">${age(k.birth_year) ? `Age ${age(k.birth_year)} · ` : ""}${esc(SUP[k.support_level]?.label || "")}</p>
         <div class="chips">${(k.interests||[]).slice(0,5).map(i => `<span class="chip">${esc(i)}</span>`).join("")}</div>
+        ${(() => { const n = (window.SHE_deadlines?.(k) || []).find(d => !d.info); const pr = window.SHE_guideProgress?.(k); return n ? `<p class="small"><b>Next:</b> ${esc(n.title)}, ${whenTxt(n.due)}</p>` : pr && pr.total && pr.done < pr.total ? `<p class="small"><b>Registration:</b> ${pr.done} of ${pr.total} steps done</p>` : ""; })()}
         <span class="small" style="color:var(--accent);font-weight:700">Open plans →</span></a>`).join("")}</div>`
       : `<div class="card empty stack"><h2>Start with your child</h2><p>Tell us what your child loves and how they communicate, and we'll build their first week of lessons around it.</p><p><a class="btn primary" href="#/child/new">Add your first child</a></p></div>`}
   </div>`;
@@ -393,6 +411,11 @@ async function childView(id){
     <p class="small"><a href="#/">← Your family</a></p>
     <div class="row" style="justify-content:space-between"><div class="stack" style="gap:4px"><h1>${esc(c.name)}</h1><p class="muted">${age(c.birth_year) ? `Age ${age(c.birth_year)} · ` : ""}${esc(SUP[c.support_level]?.label)} · ${esc(fw.name)}</p></div><a class="btn quiet" href="#/child/${id}/edit">Edit profile</a></div>
     <div class="chips">${(c.interests||[]).map(i => `<span class="chip">${esc(i)}</span>`).join("") || `<span class="muted small">Add favourite things to their profile for better plans.</span>`}</div>
+    ${(() => { const g = window.SHE_GUIDES?.[c.state]; if (!g) return ""; const pr = window.SHE_guideProgress(c), dl = window.SHE_deadlines(c).slice(0, 3);
+      return `<a class="card stack reqcard" href="#/child/${id}/guide"><div class="row" style="justify-content:space-between"><h2>${esc(g.name)} requirements</h2><span class="chip">${pr.done} of ${pr.total} steps</span></div>
+        <div class="progress"><i style="width:${pr.total ? Math.round(pr.done / pr.total * 100) : 0}%"></i></div>
+        ${dl.length ? `<ul class="dues">${dl.map(dueRow).join("")}</ul>` : `<p class="small muted">${c.reg_date ? "No deadlines coming up." : "Add your registration date in the guide to see your deadlines."}</p>`}
+        <span class="small" style="color:var(--accent);font-weight:700">Open the step-by-step guide →</span></a>`; })()}
     <form class="card stack" id="genForm">
       <h2>Plan a week</h2>
       <div class="grid2">
@@ -485,6 +508,43 @@ async function planView(id, dayIdx = 0){
   view.querySelectorAll("[data-add]").forEach(b => b.onclick = async () => { const d = +b.dataset.add; ct.days[d].lessons.push({ title:"New lesson", areas:[], minutes:10, goal:"", hook:"", materials:"", steps:[], communication:"", adjustments:"", evidence:"" }); await db.savePlanContent(id, ct); await planView(id, d); const arts = view.querySelectorAll(`section.day[data-d="${d}"] article.lesson`); const last = arts[arts.length-1]; editLesson(last, ct, d, ct.days[d].lessons.length-1, id, d); last.scrollIntoView({ block:"center" }); });
   $("pPrint").onclick = () => window.print();
   $("pDel").onclick = () => { $("pDelArea").innerHTML = `<span class="confirm">Delete this plan, its records, and its photos and videos?<button class="btn danger small" type="button" id="pdy">Delete</button><button class="btn quiet small" type="button" id="pdn">Keep</button></span>`; $("pdn").onclick = () => planView(id, dayIdx); $("pdy").onclick = async () => { await db.deletePlan(id); toast("Plan deleted"); location.hash = `#/child/${p.child_id}`; }; };
+}
+
+const APP_HELP = {
+  pack: "Spectrum Home Ed will write this for you from your child's profile (registration pack, coming next).",
+  plans: "Your weekly plans in Spectrum Home Ed are your program in action.",
+  time: "Spectrum Home Ed tracks learning time by area on every weekly plan.",
+  evidence: "Use 📷 Add photo or video and the progress buttons on each lesson. They're saved with dates and learning areas.",
+  report: "Spectrum Home Ed will turn your records and photos into a progress report (coming soon)."
+};
+async function guideView(id){
+  const c = await db.child(id); const g = window.SHE_GUIDES[c.state];
+  if (!g) { view.innerHTML = `<div class="card">No guide for this state yet.</div>`; return; }
+  const done = c.checklist || {};
+  const dl = window.SHE_deadlines(c);
+  const stepHTML = s => `<li class="step ${done[s.id] ? "done" : ""}">
+      <label class="tick"><input type="checkbox" data-step="${s.id}" ${done[s.id] ? "checked" : ""}><span><b>${esc(s.title)}</b>${done[s.id] ? `<span class="small muted"> · done ${nice(String(done[s.id]).slice(0,10))}</span>` : ""}</span></label>
+      <p>${esc(s.body)}</p>${s.app ? `<p class="apphelp small">${esc(APP_HELP[s.app])}</p>` : ""}</li>`;
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small"><a href="#/child/${id}">← ${esc(c.name)}</a></p>
+    <div class="stack" style="gap:6px"><h1>Home education in ${esc(g.name)}</h1><p class="muted">${esc(g.authority)}</p></div>
+    <p>${esc(g.overview)}</p>
+    ${g.caution ? `<p class="banner">${esc(g.caution)}</p>` : ""}
+    <div class="card stack"><h2>${esc(c.name)}'s dates</h2>
+      <div class="grid2">${Object.entries(g.dates).map(([k, label]) => `<label class="f">${esc(label)} <input type="date" data-date="${k}" value="${esc(c[k] || "")}"></label>`).join("")}</div>
+      ${dl.length ? `<ul class="dues">${dl.map(dueRow).join("")}</ul>` : `<p class="small muted">${c.reg_date ? "No deadlines coming up." : "Once you're registered, add the date here and we'll show what's due and when."}</p>`}
+    </div>
+    <div class="stack"><h2>Getting registered</h2><ol class="steps">${g.steps.filter(s => s.phase === "start").map(stepHTML).join("")}</ol></div>
+    <div class="stack"><h2>Each year</h2><ol class="steps">${g.steps.filter(s => s.phase === "year").map(stepHTML).join("")}</ol></div>
+    <div class="card stack"><h2>Contacts</h2><ul class="links">${g.contact.map(([t, u]) => `<li><a href="${esc(u)}" ${u.startsWith("http") ? `target="_blank" rel="noopener"` : ""}>${esc(t)}</a></li>`).join("")}</ul></div>
+    <div class="stack"><h3>Sources</h3><ul class="small">${g.sources.map(([t, u]) => `<li><a href="${esc(u)}" target="_blank" rel="noopener">${esc(t)}</a></li>`).join("")}</ul>
+      <p class="small muted">Checked against official pages on ${esc(window.SHE_GUIDE_VERIFIED)}. Rules can change, so confirm anything important with ${esc(g.authority.split(",")[0])}. This guide is general information, not legal advice.</p></div>
+  </div>`;
+  view.querySelectorAll("[data-step]").forEach(cb => cb.onchange = async () => {
+    const cl = { ...(c.checklist || {}) }; if (cb.checked) cl[cb.dataset.step] = new Date().toISOString().slice(0, 10); else delete cl[cb.dataset.step];
+    try { await db.saveChild({ id, checklist: cl }); toast(cb.checked ? "Ticked off" : "Unticked"); guideView(id); } catch(e){ toast(e.message); cb.checked = !cb.checked; } });
+  view.querySelectorAll("[data-date]").forEach(inp => inp.onchange = async () => {
+    try { await db.saveChild({ id, [inp.dataset.date]: inp.value || null }); toast("Date saved"); guideView(id); } catch(e){ toast(e.message); } });
 }
 
 function editLesson(article, ct, d, k, planId, dayIdx){
@@ -668,6 +728,7 @@ async function route(){
   if (h.split("?")[0] === "/billing" && LIVE) return guard(billingView);
   if (h === "/child/new") return guard(() => childFormView());
   if ((m = h.match(/^\/child\/([\w-]+)\/edit$/))) return guard(() => childFormView(m[1]));
+  if ((m = h.match(/^\/child\/([\w-]+)\/guide$/))) return guard(() => guideView(m[1]));
   if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));
   if ((m = h.match(/^\/plan\/([\w-]+)$/))) return guard(() => planView(m[1]));
   return guard(homeView);
