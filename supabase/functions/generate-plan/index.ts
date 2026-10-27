@@ -182,9 +182,10 @@ Deno.serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
-  const { child_id, week_start, focus, extra, kind, answers } = body ?? {};
-  const isProgram = kind === "program";
-  if (!child_id || (!isProgram && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
+  const { child_id, week_start, focus, extra, kind, answers, year } = body ?? {};
+  const isProgram = kind === "program", isYear = kind === "year";
+  if (!child_id || (!isProgram && !isYear && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
+  if (isYear && !(Number(year) >= 2020 && Number(year) <= 2100)) return json({ error: "Choose a year." }, 400);
 
   const { data: child, error: childErr } = await userClient.from("children").select("*").eq("id", child_id).single();
   if (childErr || !child) return json({ error: "Child not found." }, 404);
@@ -214,6 +215,18 @@ Principles: interest-led (use the child's favourite things as the hook in nearly
 Write in plain Australian English for a tired parent: short sentences, concrete steps, no jargon. Never use the child's interests in a way that mocks them. Keep it safe: adult supervision for water, heat, knives and outings.`;
 
   const interests: string[] = (child.interests || []).length ? child.interests : ["their favourite things"];
+  // Weekly plans follow the year plan's term theme and focus, when there is one
+  let termNote = "";
+  if (!isProgram && !isYear && week_start) {
+    const wy = Number(week_start.slice(0, 4)), wm = Number(week_start.slice(5, 7));
+    const ti = wm <= 4 ? 0 : wm <= 6 ? 1 : wm <= 9 ? 2 : 3;
+    const { data: yp } = await userClient.from("year_plans").select("content").eq("child_id", child_id).eq("year", wy).maybeSingle();
+    const t = yp?.content?.terms?.[ti];
+    if (t) termNote = `- This term (Term ${ti + 1}) theme: ${String(t.theme ?? "").slice(0, 200)}
+- Term goals: ${(Array.isArray(t.goals) ? t.goals : []).slice(0, 6).join("; ").slice(0, 600)}
+- Term focus by learning area: ${Object.entries(t.areas ?? {}).map(([k, v]) => `${k}: ${v}`).join("; ").slice(0, 1200)}
+Build this week's lessons around the term theme and goals.`;
+  }
   const profile = `Child profile
 - Name: ${child.name}
 - Age: ${age ?? "unknown"}
@@ -225,7 +238,8 @@ Write in plain Australian English for a tired parent: short sentences, concrete 
 - Parent's goals: ${child.goals || "none"}
 - Learning time: about ${minutes} minutes a day${adjusted ? ` (reduced by the parent: ${child.time_reason || "no reason given"})` : ` (recommended for ${rec.stage.toLowerCase()} age)`}
 ${focus ? `- Focus this week: ${String(focus).slice(0, 300)}` : ""}
-${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
+${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}
+${termNote}`;
 
   const str = { type: "string" };
   const lessonSchema = {
@@ -283,6 +297,47 @@ ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
     }
     if (lastGood) return lastGood;
     throw new Error("planner failed");
+  }
+
+  // ---------- Year plan: 4 terms, each with a theme, goals and a focus per learning area ----------
+  if (isYear) {
+    const { data: prog } = await userClient.from("programs").select("content").eq("child_id", child_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const progGoals = (prog?.content?.sections ?? []).find((x: any) => /goal/i.test(x.heading))?.body ?? "";
+    const yPrompt = `${profile}
+
+Plan ${child.name}'s home education year for ${year}, as 4 school terms of about 10 weeks.
+${progGoals ? `Goals from the parent's registration program:\n${String(progGoals).slice(0, 1200)}\n` : ""}${extra ? `Parent's notes for the year: ${String(extra).slice(0, 600)}\n` : ""}
+For each term give:
+- theme: a short, fun theme built on one or two of the child's interests (vary across the year)
+- goals: 3 or 4 observable goals at the child's real level, building on the previous term
+- areas: a one-sentence focus for every learning area: ${fw.areas.join(", ")}
+- activities: 3 to 5 hands-on or community activities (outings, cooking, swimming, projects)
+Also give the year a short title and a two-sentence summary for the parent. Keep everything short and concrete. Use respectful, neuro-affirming language.`;
+    const areaProps = Object.fromEntries(fw.areas.map((ar) => [ar, { type: "string" }]));
+    const ySchema = { type: "object", properties: { title: { type: "string" }, summary: { type: "string" }, terms: { type: "array", minItems: 4, maxItems: 4, items: { type: "object", properties: { theme: { type: "string" }, goals: { type: "array", items: { type: "string" } }, areas: { type: "object", properties: areaProps }, activities: { type: "array", items: { type: "string" } } }, required: ["theme", "goals", "areas", "activities"] } } }, required: ["title", "terms"] };
+    const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start: `${year}-01-01` }).select("id").single();
+    if (jobErr || !job) return json({ error: "Couldn't start writing. Please try again." }, 500);
+    const setJob = (f: Record<string, unknown>) => admin.from("plan_jobs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", job.id);
+    const work = async () => {
+      try {
+        const out = obj(await callTool(yPrompt, "save_year", ySchema, 10000, (d) => arr(d?.terms).length >= 4));
+        const terms = arr(out.terms).map(obj).slice(0, 4).map((t: any, i: number) => ({
+          term: i + 1, theme: String(t.theme ?? "").slice(0, 200),
+          goals: arr(t.goals).map((g: unknown) => String(g).slice(0, 200)).filter(Boolean).slice(0, 6),
+          areas: Object.fromEntries(fw.areas.map((ar) => [ar, String(obj(t.areas)?.[ar] ?? "").slice(0, 300)])),
+          activities: arr(t.activities).map((g: unknown) => String(g).slice(0, 200)).filter(Boolean).slice(0, 8),
+        }));
+        if (terms.length < 4) { await setJob({ status: "failed", error: "The year plan came back incomplete. Please try again." }); return; }
+        await admin.from("generations").insert({ parent_id: user!.id });
+        const content = { title: String(out.title ?? `${child.name}'s ${year}`).slice(0, 120), summary: String(out.summary ?? "").slice(0, 600), terms, areas: fw.areas };
+        const { data: saved, error } = await admin.from("year_plans").upsert({ parent_id: user!.id, child_id, year: Number(year), content, updated_at: new Date().toISOString() }, { onConflict: "child_id,year" }).select("id").single();
+        if (error || !saved) { console.error("Year save failed", error); await setJob({ status: "failed", error: "Couldn't save the year plan. Please try again." }); return; }
+        await setJob({ status: "done", year_plan_id: saved.id, progress: 5 });
+      } catch (e) { console.error("Year failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
+    };
+    // @ts-ignore EdgeRuntime is provided by Supabase
+    EdgeRuntime.waitUntil(work());
+    return json({ job_id: job.id }, 202);
   }
 
   // ---------- Registration pack: the written education program each state asks for ----------

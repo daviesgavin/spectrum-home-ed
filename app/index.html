@@ -85,6 +85,8 @@ textarea{min-height:72px;resize:vertical}
 .hpi{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ev{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
 .reqcard{text-decoration:none;color:inherit}
+.term input[type=text],.term textarea{width:100%}
+@media print{.term{break-inside:avoid-page}}
 .psec textarea{width:100%;font:16px/1.55 var(--body);padding:12px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);resize:vertical;min-height:120px}
 .ptext{white-space:pre-wrap}
 .printonly{display:none}
@@ -225,7 +227,7 @@ if (LIVE) {
         const { data: j } = await sb.from("plan_jobs").select("status,progress,plan_id,program_id,error").eq("id", jobId).maybeSingle();
         if (!j) continue;
         if (typeof onProgress === "function") onProgress(j.progress || 0);
-        if (j.status === "done" && (j.plan_id || j.program_id)) return j;
+        if (j.status === "done" && (j.plan_id || j.program_id || j.year_plan_id)) return j;
         if (j.status === "failed") throw new Error(j.error || "The writer had a problem. Please try again.");
       }
       throw new Error("This is taking longer than usual. Check back in a few minutes; it will appear when it's ready.");
@@ -234,6 +236,13 @@ if (LIVE) {
       const r = await sb.functions.invoke("generate-plan", { body:{ kind: "program", child_id: child.id, answers } });
       if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
       const j = await this.waitJob(r.data.job_id); return { id: j.program_id };
+    },
+    async yearPlan(childId, year){ const r = await sb.from("year_plans").select("*").eq("child_id", childId).eq("year", year).maybeSingle(); if (r.error) throw new Error(r.error.message); return r.data; },
+    async saveYear(id, content){ return must(await sb.from("year_plans").update({ content, updated_at: new Date().toISOString() }).eq("id", id).select().single()); },
+    async writeYear(child, year, extra){
+      const r = await sb.functions.invoke("generate-plan", { body:{ kind: "year", child_id: child.id, year, extra } });
+      if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
+      return this.waitJob(r.data.job_id);
     },
     async programs(childId){ return must(await sb.from("programs").select("id,title,state,created_at,updated_at").eq("child_id", childId).order("created_at", { ascending:false })); },
     async program(id){ return must(await sb.from("programs").select("*").eq("id", id).single()); },
@@ -278,6 +287,7 @@ if (LIVE) {
     async savePlanContent(id, content){ const d = load(); const p = d.plans.find(x => x.id === id); p.content = content; p.title = content.title; save(d); return p; },
     async evidence(){ return []; },
     async programs(){ return []; },
+    async yearPlan(){ return null; },
     async deletePlan(id){ const d = load(); d.plans = d.plans.filter(x => x.id !== id); d.logs = d.logs.filter(l => l.plan_id !== id); save(d); },
     async logs(planId){ return load().logs.filter(l => l.plan_id === planId); },
     async log(planId, key, rating, note){ const d = load(); let l = d.logs.find(x => x.plan_id === planId && x.lesson_key === key); if (!l) { l = { id: uuid(), plan_id: planId, lesson_key: key }; d.logs.push(l); } l.rating = rating; l.note = note; save(d); return l; },
@@ -421,7 +431,8 @@ async function childFormView(id){
 }
 
 async function childView(id){
-  const [c, plans, progs] = await Promise.all([db.child(id), db.plans(id), db.programs(id)]);
+  const yr = new Date().getFullYear(), ti = termIndex(new Date());
+  const [c, plans, progs, yp] = await Promise.all([db.child(id), db.plans(id), db.programs(id), db.yearPlan(id, yr).catch(() => null)]);
   const fw = FW[c.state] || FW.WA;
   const wk = iso(mondayOf(new Date()));
   view.innerHTML = `<div class="stack">${banner()}
@@ -437,6 +448,11 @@ async function childView(id){
       <p class="small muted">The written ${esc(PACK_NAME[c.state] || "education program")} ${esc(window.SHE_GUIDES[c.state].name)} asks for, drafted from ${esc(c.name)}'s profile. You check and edit it before sending.</p>
       ${progs.length ? `<div class="plans">${progs.map(p => `<a class="planrow" href="#/program/${p.id}"><span><b>${esc(p.title || "Program")}</b><br><span class="muted small">Written ${nice(iso(new Date(p.created_at)))}${p.updated_at && iso(new Date(p.updated_at)) !== iso(new Date(p.created_at)) ? ` · edited ${nice(iso(new Date(p.updated_at)))}` : ""}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : ""}
       <div><a class="btn ${progs.length ? "quiet" : "primary"}" href="#/child/${id}/program">${progs.length ? "Write a new version" : `Write ${esc(c.name)}'s ${esc(PACK_NAME[c.state] || "program")}`}</a></div></div>` : ""}
+    ${LIVE ? (() => { const t = yp?.content?.terms?.[ti];
+      return `<div class="card stack"><div class="row" style="justify-content:space-between"><h2>${yr} year plan</h2>${yp ? `<a class="small" href="#/child/${id}/year/${yr}">Open →</a>` : ""}</div>
+      ${t ? `<p><b>Term ${ti + 1}: ${esc(t.theme)}</b></p><ul style="margin:0;padding-left:20px">${(t.goals || []).map(g => `<li>${esc(g)}</li>`).join("")}</ul><p class="small muted">Weekly plans follow this term's theme and goals.</p>`
+        : `<p class="small muted">Plan the whole year in 4 terms, each with a theme built on ${esc(c.name)}'s interests, goals, and a focus for every learning area. Weekly plans then follow the term.</p><div><a class="btn quiet" href="#/child/${id}/year/${yr}">Plan ${esc(c.name)}'s ${yr}</a></div>`}
+      ${new Date().getMonth() >= 9 ? `<p class="small"><a href="#/child/${id}/year/${yr + 1}">Plan ${yr + 1} →</a></p>` : ""}</div>`; })() : ""}
     <form class="card stack" id="genForm">
       <h2>Plan a week</h2>
       <div class="grid2">
@@ -539,6 +555,49 @@ const PACK_TIP = {
   ACT: "Check the ACT Home Education team's current Statement of Intent form, and paste these sections into it.",
   TAS: "Each heading matches one of the Registrar's standards. Keep the headings bold when you paste it into your HESP."
 };
+// Rough school terms: Term 1 Feb–Apr, Term 2 May–Jun, Term 3 Jul–Sep, Term 4 Oct–Dec (dates differ by state)
+function termIndex(d){ const m = d.getMonth() + 1; return m <= 4 ? 0 : m <= 6 ? 1 : m <= 9 ? 2 : 3; }
+const TERM_MONTHS = ["about February to April", "about May to June", "about July to September", "about October to December"];
+async function yearView(childId, year){
+  const c = await db.child(childId); let yp = await db.yearPlan(childId, year);
+  const writeForm = (again) => `<form class="card stack" id="yf"><h2>${again ? "Write a new version" : `Plan ${esc(c.name)}'s ${year}`}</h2>
+      <p class="small muted">We'll plan 4 terms around ${esc(c.name)}'s interests and the goals in their profile${again ? ". This replaces the current year plan" : ""}.</p>
+      <label class="f">Anything to plan around? <small>Optional: holidays, therapy blocks, big events, what you'd like to focus on</small><textarea id="yExtra" maxlength="600" rows="3"></textarea></label>
+      <p id="yMsg" role="alert" style="color:var(--bad)"></p>
+      <div class="row"><button class="btn ${again ? "" : "primary"}" type="submit" id="yGo">${again ? "Rewrite the year" : "Plan the year"}</button><span id="yWait" hidden><span class="spinner"></span> Planning. This usually takes 1 to 3 minutes. Keep this page open.</span></div></form>`;
+  if (!yp) {
+    view.innerHTML = `<div class="stack">${banner()}<p class="small"><a href="#/child/${childId}">← ${esc(c.name)}</a></p><h1>${esc(c.name)}'s ${year}</h1>${writeForm(false)}</div>`;
+  } else {
+    const ct = yp.content, areas = ct.areas || Object.keys(ct.terms[0]?.areas || {});
+    view.innerHTML = `<div class="stack">${banner()}
+      <p class="small noprint"><a href="#/child/${childId}">← ${esc(c.name)}</a></p>
+      <div class="stack" style="gap:6px"><h1>${esc(ct.title || `${c.name}'s ${year}`)}</h1><p class="muted">${esc(c.name)} · ${year} · 4 terms</p></div>
+      ${ct.summary ? `<p>${esc(ct.summary)}</p>` : ""}
+      <p class="small muted noprint">Edit anything below, then save. Weekly plans follow the theme, goals and focus for the term they fall in. Term dates differ by state, so these terms are approximate.</p>
+      ${ct.terms.map((t, i) => `<section class="card stack term" data-t="${i}">
+        <div class="row" style="justify-content:space-between"><h2>Term ${i + 1}</h2><span class="small muted">${TERM_MONTHS[i]}</span></div>
+        <label class="f">Theme <input type="text" data-k="theme" value="${esc(t.theme)}" maxlength="200"></label>
+        <label class="f">Goals <small>One per line</small><textarea data-k="goals" rows="4">${esc((t.goals || []).join("\n"))}</textarea></label>
+        <div class="stack" style="gap:8px"><b>Focus by learning area</b>${areas.map(a => `<label class="f small">${esc(a)}<input type="text" data-area="${esc(a)}" value="${esc(t.areas?.[a] || "")}" maxlength="300"></label>`).join("")}</div>
+        <label class="f">Hands-on and community activities <small>One per line</small><textarea data-k="activities" rows="4">${esc((t.activities || []).join("\n"))}</textarea></label>
+      </section>`).join("")}
+      <div class="row noprint"><button class="btn primary" type="button" id="ySave">Save changes</button><button class="btn" type="button" id="yPrint">Print or save as PDF</button></div>
+      <div class="noprint">${writeForm(true)}</div>
+    </div>`;
+    $("ySave").onclick = async () => {
+      view.querySelectorAll("section.term").forEach(sec => { const t = ct.terms[+sec.dataset.t];
+        t.theme = sec.querySelector('[data-k="theme"]').value.trim();
+        t.goals = sec.querySelector('[data-k="goals"]').value.split("\n").map(x => x.trim()).filter(Boolean);
+        t.activities = sec.querySelector('[data-k="activities"]').value.split("\n").map(x => x.trim()).filter(Boolean);
+        sec.querySelectorAll("[data-area]").forEach(inp => { t.areas[inp.dataset.area] = inp.value.trim(); }); });
+      try { await db.saveYear(yp.id, ct); toast("Year plan saved"); } catch(e){ toast(e.message); } };
+    $("yPrint").onclick = () => window.print();
+  }
+  $("yf").onsubmit = async e => { e.preventDefault(); $("yGo").disabled = true; $("yWait").hidden = false; $("yMsg").textContent = "";
+    try { await db.writeYear(c, year, $("yExtra").value.trim()); yearView(childId, year); window.scrollTo(0, 0); }
+    catch(err){ $("yGo").disabled = false; $("yWait").hidden = true; $("yMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+}
+
 async function programFormView(childId){
   const c = await db.child(childId); const g = window.SHE_GUIDES[c.state] || {};
   const q = (k, label, hint, ph) => `<label class="f">${label} ${hint ? `<small>${hint}</small>` : ""}<textarea id="q_${k}" maxlength="600" rows="2" placeholder="${esc(ph || "")}"></textarea></label>`;
@@ -805,6 +864,7 @@ async function route(){
   if ((m = h.match(/^\/child\/([\w-]+)\/guide$/))) return guard(() => guideView(m[1]));
   if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/program$/))) return guard(() => programFormView(m[1]));
   if (LIVE && (m = h.match(/^\/program\/([\w-]+)$/))) return guard(() => programView(m[1]));
+  if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/year\/(\d{4})$/))) return guard(() => yearView(m[1], +m[2]));
   if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));
   if ((m = h.match(/^\/plan\/([\w-]+)$/))) return guard(() => planView(m[1]));
   return guard(homeView);
