@@ -231,7 +231,7 @@ function authView(mode = "in"){
     try {
       if (mode === "up") { const r = await db.signUp(email, pass); if (r.session) { user = r.user; location.hash = "#/child/new"; route(); } else { msg.style.color = "var(--good)"; msg.textContent = "Check your email and tap the link to confirm your account, then sign in."; } }
       else if (mode === "reset") { await db.reset(email); msg.style.color = "var(--good)"; msg.textContent = "If that email has an account, a reset link is on its way."; }
-      else { user = await db.signIn(email, pass); location.hash = "#/"; route(); }
+      else { user = await db.signIn(email, pass); if (location.hash !== "#/admin") location.hash = "#/"; route(); }
     } catch(err) { msg.textContent = err.message === "Invalid login credentials" ? "That email and password don't match. Try again or reset your password." : err.message; }
     $("aGo").disabled = false;
   };
@@ -250,6 +250,7 @@ function accessLabel(a){
 }
 async function homeView(){
   const [kids, acc] = await Promise.all([db.children(), db.access()]);
+  try { acc.is_admin ? localStorage.setItem("she-admin", "1") : localStorage.removeItem("she-admin"); } catch(e){}
   view.innerHTML = `<div class="stack">${banner()}
     <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>Your family</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span><a class="small" href="#/billing">Plans and billing</a>${acc.is_admin ? `<a class="small" href="#/admin">Admin dashboard</a>` : ""}</div>` : ""}</div><a class="btn primary" href="#/child/new">Add a child</a></div>
     ${kids.length ? `<div class="kids">${kids.map(k => `<a class="card kid" href="#/child/${k.id}">

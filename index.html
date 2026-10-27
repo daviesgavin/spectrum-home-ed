@@ -53,7 +53,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .nav ul{display:flex;gap:18px;list-style:none;margin:0;padding:0;flex-wrap:wrap}
 .nav ul a{color:var(--ink);text-decoration:none;font-weight:700;font-size:15px}
 .nav ul a:hover{color:var(--accent)}
-@media (max-width:640px){.nav ul{display:none}}
+@media (max-width:640px){.nav ul{gap:14px;flex-wrap:nowrap;flex:none}.nav .brand{white-space:nowrap;font-size:18px}.nav ul li:not(.keep){display:none}}
 /* hero */
 .hero{padding-block:56px 40px;display:grid;grid-template-columns:1.25fr 1fr;gap:40px;align-items:center}
 .hero>*{min-width:0}
@@ -159,7 +159,8 @@ section[id],main{scroll-margin-top:72px}
       <li><a href="#curriculum">Curriculum</a></li>
       <li><a href="#board">Phrase board</a></li>
       <li><a href="#faq">FAQ</a></li>
-      <li><a href="app/">Sign in</a></li>
+      <li class="keep"><a href="app/">Sign in</a></li>
+      <li class="keep" id="adminLink" hidden><a href="app/#/admin" style="font-weight:800">Admin</a></li>
     </ul>
   </div>
 </header>
@@ -327,6 +328,7 @@ document.querySelectorAll('.tile').forEach(b=>b.addEventListener('click',()=>{
   try{if('speechSynthesis' in window){speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-AU';u.pitch=1.4;u.rate=.9;speechSynthesis.speak(u)}}catch(e){}
 }));
 </script>
+<script>try{if(localStorage.getItem("she-admin")==="1")document.getElementById("adminLink").hidden=false}catch(e){}</script>
 <script src="track.js" defer></script>
 </body>
 </html>
