@@ -85,7 +85,7 @@ function clean(plan: any, areas: string[]) {
     days: days.map((d: any) => ({
       day: asStr(d?.day, 20),
       regulation: asStr(d?.regulation, 300),
-      lessons: arr(d?.lessons).map(obj).slice(0, 12).map((l: any) => ({
+      lessons: arr(d?.lessons ?? d?.activities).map(obj).slice(0, 12).map((l: any) => ({
         title: asStr(l?.title, 120),
         areas: arr(l?.areas).filter((a: unknown) => typeof a === "string" && areas.includes(a)).slice(0, 3),
         minutes: Math.max(3, Math.min(120, Number(l?.minutes) || 10)),
@@ -184,30 +184,43 @@ ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
     },
     required: ["title", "areas", "minutes", "goal", "hook", "steps", "communication", "adjustments", "evidence"],
   };
-  const daySchema = { type: "object", properties: { regulation: { ...str, description: "One sensory or movement suggestion for the day" }, lessons: { type: "array", items: lessonSchema } }, required: ["regulation", "lessons"] };
+  const daySchema = { type: "object", properties: { lessons: { type: "array", items: lessonSchema, minItems: 2, description: "Every lesson and hands-on activity for the day, in order" }, regulation: { ...str, description: "One short sensory or movement suggestion for the day" } }, required: ["lessons", "regulation"] };
   const overviewSchema = { type: "object", properties: { title: str, summary: { ...str, description: "Two sentences" }, focus_goals: { type: "array", items: str, minItems: 3, maxItems: 5 } }, required: ["title", "summary", "focus_goals"] };
 
   const model = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5";
-  async function callTool(prompt: string, name: string, schema: unknown, maxTokens: number) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+  // Calls the model and checks the result. Tries the tool twice, then once more asking for plain JSON text with extra room.
+  async function callTool(prompt: string, name: string, schema: unknown, maxTokens: number, ok: (v: any) => boolean = () => true) {
+    let lastGood: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const plain = attempt === 2;
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": apiKey!, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
-          model, max_tokens: maxTokens, system,
-          tools: [{ name, description: "Save the result. Always call this tool exactly once with the complete result.", input_schema: schema }],
-          tool_choice: { type: "auto" },
-          messages: [{ role: "user", content: `${prompt}\n\nReply by calling the ${name} tool once with the complete result. Do not reply with text.` }],
+          model, max_tokens: plain ? maxTokens * 2 : maxTokens, system,
+          ...(plain ? {} : {
+            tools: [{ name, description: "Save the result. Always call this tool exactly once with the complete result.", input_schema: schema }],
+            tool_choice: { type: "auto" },
+          }),
+          messages: [{ role: "user", content: plain
+            ? `${prompt}\n\nReply with only one JSON object (no other text) matching this JSON schema:\n${JSON.stringify(schema)}`
+            : `${prompt}\n\nReply by calling the ${name} tool once with the complete result. Do not reply with text.` }],
         }),
       });
       if (!resp.ok) { console.error("Anthropic error", resp.status, (await resp.text()).slice(0, 500)); continue; }
       const out = await resp.json();
       const use = (out.content ?? []).find((c: any) => c.type === "tool_use");
-      if (use?.input) return use.input;
-      const text = (out.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
-      try { return extractJson(text); } catch { /* fall through */ }
-      console.error("No tool output", out.stop_reason, JSON.stringify(out.content ?? []).slice(0, 300));
+      let result: any = use?.input ?? null;
+      if (!result) {
+        const text = (out.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
+        try { result = extractJson(text); } catch { /* none */ }
+      }
+      if (result && ok(obj(result))) return result;
+      if (result) lastGood = result;
+      console.error(`Incomplete ${name} (attempt ${attempt + 1}${plain ? ", plain JSON" : ""})`, "stop:", out.stop_reason, "usage:", JSON.stringify(out.usage ?? {}),
+        "keys:", result ? Object.keys(obj(result)).join(",") : "none", "sample:", JSON.stringify(out.content ?? []).slice(0, 400));
     }
+    if (lastGood) return lastGood;
     throw new Error("planner failed");
   }
 
@@ -231,7 +244,7 @@ Give this week's plan (starting ${week_start}) a short title, a two-sentence sum
   try {
     [overview, ...dayResults] = await Promise.all([
       callTool(overviewPrompt, "save_overview", overviewSchema, 1000),
-      ...DAYS.map((_, i) => callTool(dayPrompt(i), "save_day", daySchema, 6000)),
+      ...DAYS.map((_, i) => callTool(dayPrompt(i), "save_day", daySchema, 12000, (d) => arr(d?.lessons ?? d?.activities).length > 0)),
     ]);
   } catch (e) {
     console.error("Generation failed", e);
