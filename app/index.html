@@ -799,8 +799,8 @@ function editLesson(article, ct, d, k, planId, dayIdx){
 }
 
 const PLANS = [
-  { key: "family", name: "Family", month: 24.99, year: 229, features: ["Unlimited personalised AI lesson plans", "Weekly plans tailored to each child's interests", "Learning time tracked by curriculum area", "Progress tracking and printable plans", "Photo and video evidence on every lesson", "Up to 3 children"] },
-  { key: "plus", name: "Family Plus", month: 34.99, year: 329, features: ["Everything in Family", "Moderator report packs (coming soon)", "Evidence folder export (coming soon)", "Share plans with therapists (coming soon)"] }
+  { key: "family", name: "Family", month: 24.99, year: 229, features: ["Unlimited personalised AI lesson plans", "Weekly plans tailored to each child's interests", "Year plans: 4 terms, each with a theme and goals", "Step-by-step guide to your state's requirements, with deadlines", "Registration pack: your written education program, drafted for you", "Progress reports for your moderator or review, with photos", "Learning time tracked by curriculum area", "Photo and video evidence on every lesson", "Up to 3 children"] },
+  { key: "plus", name: "Family Plus", month: 34.99, year: 329, features: ["Everything in Family", "Evidence folder export (coming soon)", "Share plans with therapists (coming soon)"] }
 ];
 async function billingView(){
   const status = (location.hash.split("?")[1] || "").match(/status=(\w+)/)?.[1];
