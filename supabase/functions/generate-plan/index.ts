@@ -191,13 +191,14 @@ ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
   // Calls the model and checks the result. Tries the tool twice, then once more asking for plain JSON text with extra room.
   async function callTool(prompt: string, name: string, schema: unknown, maxTokens: number, ok: (v: any) => boolean = () => true) {
     let lastGood: any = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const plain = attempt === 2;
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const plain = attempt === 1;
+      let resp: Response;
+      try { resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", signal: AbortSignal.timeout(150_000),
         headers: { "x-api-key": apiKey!, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
-          model, max_tokens: plain ? maxTokens * 2 : maxTokens, system,
+          model, max_tokens: maxTokens, system,
           ...(plain ? {} : {
             tools: [{ name, description: "Save the result. Always call this tool exactly once with the complete result.", input_schema: schema }],
             tool_choice: { type: "auto" },
@@ -206,7 +207,7 @@ ${extra ? `- Extra notes from parent: ${String(extra).slice(0, 500)}` : ""}`;
             ? `${prompt}\n\nReply with only one JSON object (no other text) matching this JSON schema:\n${JSON.stringify(schema)}`
             : `${prompt}\n\nReply by calling the ${name} tool once with the complete result. Do not reply with text.` }],
         }),
-      });
+      }); } catch (e) { console.error(`${name} request timed out or failed (attempt ${attempt + 1})`, String(e)); continue; }
       if (!resp.ok) { console.error("Anthropic error", resp.status, (await resp.text()).slice(0, 500)); continue; }
       const out = await resp.json();
       const use = (out.content ?? []).find((c: any) => c.type === "tool_use");
@@ -240,26 +241,38 @@ ${dayTargets ? `- Minutes to aim for today in each learning area (a lesson's min
 
 Give this week's plan (starting ${week_start}) a short title, a two-sentence summary for the parent, and 3-5 focus goals for the week, written as observable skills at the child's real level.`;
 
-  let overview: any, dayResults: any[];
-  try {
-    [overview, ...dayResults] = await Promise.all([
-      callTool(overviewPrompt, "save_overview", overviewSchema, 1000),
-      ...DAYS.map((_, i) => callTool(dayPrompt(i), "save_day", daySchema, 12000, (d) => arr(d?.lessons ?? d?.activities).length > 0)),
-    ]);
-  } catch (e) {
-    console.error("Generation failed", e);
-    return json({ error: "The lesson planner had a problem. Please try again in a minute." }, 502);
+  // Writing a week takes a few minutes, longer than a browser request can wait.
+  // So: create a job, reply straight away, and finish the plan in the background. The app checks the job until it's done.
+  const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start }).select("id").single();
+  if (jobErr || !job) { console.error("Job create failed", jobErr); return json({ error: "Couldn't start the planner. Please try again." }, 500); }
+  const setJob = (fields: Record<string, unknown>) => admin.from("plan_jobs").update({ ...fields, updated_at: new Date().toISOString() }).eq("id", job.id);
+
+  async function work() {
+    try {
+      let done = 0;
+      const tick = async <T>(p: Promise<T>) => { const v = await p; done++; await setJob({ progress: done }); return v; };
+      const [overview, ...dayResults] = await Promise.all([
+        callTool(overviewPrompt, "save_overview", overviewSchema, 1000).catch(() => ({})),
+        ...DAYS.map((_, i) => tick(callTool(dayPrompt(i), "save_day", daySchema, 12000, (d) => arr(d?.lessons ?? d?.activities).length > 0).catch((e) => { console.error(`${DAYS[i]} failed`, String(e)); return {}; }))),
+      ]);
+      const plan = clean({ ...obj(overview), days: dayResults.map((d, i) => ({ day: DAYS[i], ...obj(d) })) }, fw.areas);
+      if (!plan.days.some((d: any) => d.lessons.length)) {
+        console.error("Empty plan; sample day output:", JSON.stringify(dayResults[0]).slice(0, 800));
+        await setJob({ status: "failed", error: "The plan came back empty. Please try again." });
+        return;
+      }
+      await admin.from("generations").insert({ parent_id: user!.id });
+      const { data: saved, error: saveErr } = await admin.from("plans").insert({
+        parent_id: user!.id, child_id, week_start, title: plan.title, content: { ...plan, framework: fw.name, areas: fw.areas, targets, daily_minutes: minutes }, source: "ai",
+      }).select("id").single();
+      if (saveErr || !saved) { console.error("Save failed", saveErr); await setJob({ status: "failed", error: "Couldn't save the plan. Please try again." }); return; }
+      await setJob({ status: "done", plan_id: saved.id, progress: 5 });
+    } catch (e) {
+      console.error("Generation failed", e);
+      await setJob({ status: "failed", error: "The lesson planner had a problem. Please try again in a minute." });
+    }
   }
-  const plan = clean({ ...obj(overview), days: dayResults.map((d, i) => ({ day: DAYS[i], ...obj(d) })) }, fw.areas);
-  if (!plan.days.some((d: any) => d.lessons.length)) console.error("Empty plan; sample day output:", JSON.stringify(dayResults[0]).slice(0, 800));
-  if (!plan.days.some((d: any) => d.lessons.length)) return json({ error: "The plan came back empty. Please try again." }, 502);
-
-  await admin.from("generations").insert({ parent_id: user.id });
-
-  const { data: saved, error: saveErr } = await userClient.from("plans").insert({
-    child_id, week_start, title: plan.title, content: { ...plan, framework: fw.name, areas: fw.areas, targets, daily_minutes: minutes }, source: "ai",
-  }).select().single();
-  if (saveErr) return json({ error: "Couldn't save the plan: " + saveErr.message }, 500);
-
-  return json({ plan: saved });
+  // @ts-ignore EdgeRuntime is provided by Supabase
+  EdgeRuntime.waitUntil(work());
+  return json({ job_id: job.id }, 202);
 });

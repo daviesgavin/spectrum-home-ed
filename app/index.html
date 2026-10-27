@@ -150,10 +150,21 @@ if (LIVE) {
     async deletePlan(id){ must(await sb.from("plans").delete().eq("id", id)); },
     async logs(planId){ return must(await sb.from("lesson_logs").select("*").eq("plan_id", planId)); },
     async log(planId, key, rating, note){ return must(await sb.from("lesson_logs").upsert({ plan_id: planId, lesson_key: key, rating, note }, { onConflict:"plan_id,lesson_key" }).select().single()); },
-    async generate(child, week, focus, extra){
+    async generate(child, week, focus, extra, onProgress){
       const r = await sb.functions.invoke("generate-plan", { body:{ child_id: child.id, week_start: week, focus, extra } });
       if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
-      return r.data.plan;
+      if (r.data?.plan) return r.data.plan;
+      const jobId = r.data?.job_id; if (!jobId) throw new Error("The planner didn't start. Please try again.");
+      // The plan is written in the background. Check every few seconds for up to 8 minutes.
+      for (let i = 0; i < 120; i++) {
+        await new Promise(res => setTimeout(res, 4000));
+        const { data: j } = await sb.from("plan_jobs").select("status,progress,plan_id,error").eq("id", jobId).maybeSingle();
+        if (!j) continue;
+        if (typeof onProgress === "function") onProgress(j.progress || 0);
+        if (j.status === "done" && j.plan_id) return { id: j.plan_id };
+        if (j.status === "failed") throw new Error(j.error || "The planner had a problem. Please try again.");
+      }
+      throw new Error("This is taking longer than usual. Check the Plans list below in a few minutes.");
     },
     async generateTemplate(child, week, focus){
       const content = window.SHE_demoPlan(child, week, focus);
@@ -344,7 +355,7 @@ async function childView(id){
         <label class="f">Focus this week <small>Optional</small><input type="text" id="gFocus" maxlength="200" placeholder="e.g. asking for help, counting to 10"></label>
       </div>
       <label class="f">Anything else? <small>Optional: appointments, outings, what's working</small><textarea id="gExtra" maxlength="500"></textarea></label>
-      <div class="row"><button class="btn primary" type="submit" id="gGo">Create ${esc(c.name)}'s plan</button><span id="gWait" hidden><span class="spinner"></span> Writing ${esc(c.name)}'s week. This takes about a minute.</span></div>
+      <div class="row"><button class="btn primary" type="submit" id="gGo">Create ${esc(c.name)}'s plan</button><span id="gWait" hidden><span class="spinner"></span> <span id="gWaitTxt">Writing ${esc(c.name)}'s week. This takes 2 to 4 minutes. Keep this page open.</span></span></div>
       <p id="gMsg" role="alert" style="color:var(--bad)"></p>
     </form>
     <div class="stack"><h2>Plans</h2>
@@ -354,7 +365,7 @@ async function childView(id){
   $("genForm").onsubmit = async e => {
     e.preventDefault(); const week = $("gWeek").value; if (!week) return;
     $("gGo").disabled = true; $("gWait").hidden = false; $("gMsg").textContent = "";
-    try { const p = await db.generate(c, week, $("gFocus").value.trim(), $("gExtra").value.trim()); location.hash = `#/plan/${p.id}`; }
+    try { const p = await db.generate(c, week, $("gFocus").value.trim(), $("gExtra").value.trim(), n => { const t = $("gWaitTxt"); if (t) t.textContent = `Writing ${c.name}'s week: ${Math.min(n, 5)} of 5 days done. Keep this page open.`; }); location.hash = `#/plan/${p.id}`; }
     catch(err){
       $("gGo").disabled = false; $("gWait").hidden = true;
       if (err.code === "upgrade") {
