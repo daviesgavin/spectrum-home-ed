@@ -985,6 +985,7 @@ async function billingView(){
           <h3 style="margin-top:6px">Need more?</h3>
           <div class="grid2">${TOPUPS.map(t => `<div class="card stack" style="padding:14px"><b>${t.name}: A$${t.price.toFixed(2)}</b><span class="small muted">${t.blurb}</span><div><button class="btn ${out ? "primary" : "quiet"} small" type="button" data-topup="${t.key}">Buy ${t.name.toLowerCase()}</button></div></div>`).join("")}</div>
           <p class="small muted">One-off payment, not a subscription. Top-ups never expire while your account is open.</p></div>`; })() : ""}
+      <div class="card stack" style="margin-top:24px"><h2>Contact us</h2><p>Questions, problems or ideas? Email <a href="mailto:hello@spectrumhomeed.com">hello@spectrumhomeed.com</a> and we'll get back to you, usually within a couple of days.</p></div>
       <div class="card stack" style="margin-top:24px"><h2>Delete my account</h2>
         <p>This permanently deletes your account, every child profile, all plans and records, and every photo and video. ${acc.subscribed ? "Your subscription will be cancelled straight away. " : ""}It can't be undone.</p>
         <p class="small muted">Payment records are kept for tax purposes, as our <a href="../privacy.html#keep" target="_blank" rel="noopener">Privacy Policy</a> explains. If you want to keep anything, print your plans first.</p>
