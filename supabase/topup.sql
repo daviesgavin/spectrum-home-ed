@@ -48,3 +48,7 @@ insert into public.app_settings (key, value) values ('topup_packs', '{
   "small": { "price": "price_1UVWXyAdFZYaakceji6T9JNr", "credit_aud": 2.00, "price_aud": 4.99 },
   "large": { "price": "price_1UVWYfAdFZYaakceAGmGeTcW", "credit_aud": 4.50, "price_aud": 9.99 }
 }') on conflict (key) do update set value = excluded.value, updated_at = now();
+
+-- LIVE top-up prices (switched 28 Oct 2026)
+update public.app_settings set value = '{"small": {"price": "price_1UVX7sAdFZYaakcecwQ1mpBV", "credit_aud": 2.00, "price_aud": 4.99}, "large": {"price": "price_1UVX8UAdFZYaakcej6zI3dJN", "credit_aud": 4.50, "price_aud": 9.99}}', updated_at = now() where key = 'topup_packs';
+-- Live STRIPE_PRICES secret: {"family_month":"price_1UVX69AdFZYaakce8vPbgmfM","family_year":"price_1UVX71AdFZYaakce3cgWfH1i"}
