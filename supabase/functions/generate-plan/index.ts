@@ -87,6 +87,15 @@ const PROGRAM_DOCS: Record<string, { doc: string; sections: [string, string][] }
     ["Learning environment and routine", "Where, when and how."]] },
 };
 
+// Goal plan (IEP/ILP style) for professional accounts
+const GOAL_DOC: { doc: string; sections: [string, string][] } = { doc: "goal plan", sections: [
+  ["About the student", "Strengths, interests, how they communicate and learn best, current levels in general terms."],
+  ["Priority goals", "3 to 5 long-term goals for the period, each specific and observable, across communication, learning, social-emotional and independence as relevant."],
+  ["Short-term objectives", "For each priority goal, 2 or 3 measurable steps with the success criteria (for example 4 out of 5 opportunities, with a visual prompt)."],
+  ["Adjustments and supports", "Teaching, environment, communication, sensory and assessment adjustments, and how often they're needed."],
+  ["Strategies and responsibilities", "Key strategies for each goal and which role does what (teacher, education assistant, therapist, family)."],
+  ["Monitoring and review", "How progress data is collected, how often it's checked, and a review date placeholder."]] };
+
 // Recommended weekly learning time (keep in sync with app/planner-data.js). NSW guidance suggests about 15 hours a week for primary.
 const GROUP: Record<string, string> = { "English": "eng", "Mathematics": "math", "Languages": "lang" };
 function recommended(age: number | null, areas: string[]) {
@@ -184,8 +193,9 @@ Deno.serve(async (req) => {
 
   let body: any;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
-  const { child_id, week_start, focus, extra, kind, answers, year, facts, from, to, ws } = body ?? {};
-  const isProgram = kind === "program", isYear = kind === "year", isReport = kind === "report", isSheet = kind === "worksheet";
+  const { child_id, week_start, focus, extra, kind, answers, year, facts, from, to, ws, audience, group_ids } = body ?? {};
+  const isProgram = kind === "program", isYear = kind === "year", isReport = kind === "report", isSheet = kind === "worksheet", isSession = kind === "session";
+  const isPro = user.user_metadata?.account_type === "pro";
   if (isSheet && (!ws?.subject || !String(ws?.topic ?? "").trim())) return json({ error: "Choose a subject and a topic." }, 400);
   if (isReport && (!/^\d{4}-\d{2}-\d{2}$/.test(from ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(to ?? "") || !facts)) return json({ error: "Choose a period with some records first." }, 400);
   if (!child_id || (!isProgram && !isYear && !isReport && !isSheet && !/^\d{4}-\d{2}-\d{2}$/.test(week_start ?? ""))) return json({ error: "Choose a child and a week." }, 400);
@@ -203,7 +213,7 @@ Deno.serve(async (req) => {
   }
 
   // Daily limits per kind of AI run
-  const KIND = isProgram ? "program" : isYear ? "year" : isReport ? "report" : isSheet ? "worksheet" : "plan";
+  const KIND = isProgram ? "program" : isYear ? "year" : isReport ? "report" : isSheet ? "worksheet" : "plan"; // sessions count as plans
   const DAILY: Record<string, number> = { plan: Number(Deno.env.get("DAILY_PLAN_LIMIT") ?? "10"), worksheet: Number(Deno.env.get("DAILY_WORKSHEET_LIMIT") ?? "30"), program: 10, year: 10, report: 10 };
   const NOUN: Record<string, string> = { plan: "weekly plans", worksheet: "worksheets", program: "registration packs", year: "year plans", report: "report summaries" };
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
@@ -230,14 +240,17 @@ Deno.serve(async (req) => {
   const minutes = adjusted ? Number(child.minutes_per_day) : rec.perDay;
   const targets = adjusted ? null : rec.targets;
 
-  const system = `You write home education lesson plans for Australian parents of autistic, nonverbal and other special-needs children.
+  const system = isPro
+    ? `You write lesson plans, therapy session plans and learning goals for Australian teachers, education assistants and therapists working with autistic, nonverbal and other special-needs students. The student is identified only by initials or a nickname.
+Principles: interest-led, regulation before learning, communication in every activity (respect AAC, signs, gestalt scripts as real language), evidence-informed and neuro-affirming practice, short achievable steps, data you can actually collect in a busy room. Write concisely for a busy professional. Keep it safe and suitable for a school or clinic.`
+    : `You write home education lesson plans for Australian parents of autistic, nonverbal and other special-needs children.
 Principles: interest-led (use the child's favourite things as the hook in nearly every lesson), regulation before learning, communication in every lesson (respect AAC, signs, gestalt scripts as real language), short realistic sessions, real life counts as learning (shops, cooking, outings), success is participation.
 Write in plain Australian English for a tired parent: short sentences, concrete steps, no jargon. Never use the child's interests in a way that mocks them. Keep it safe: adult supervision for water, heat, knives and outings.`;
 
   const interests: string[] = (child.interests || []).length ? child.interests : ["their favourite things"];
   // Weekly plans follow the year plan's term theme and focus, when there is one
   let termNote = "";
-  if (!isProgram && !isYear && !isReport && !isSheet && week_start) {
+  if (!isProgram && !isYear && !isReport && !isSheet && !isSession && week_start) {
     const wy = Number(week_start.slice(0, 4)), wm = Number(week_start.slice(5, 7));
     const ti = wm <= 4 ? 0 : wm <= 6 ? 1 : wm <= 9 ? 2 : 3;
     const { data: yp } = await userClient.from("year_plans").select("content").eq("child_id", child_id).eq("year", wy).maybeSingle();
@@ -247,7 +260,7 @@ Write in plain Australian English for a tired parent: short sentences, concrete 
 - Term focus by learning area: ${Object.entries(t.areas ?? {}).map(([k, v]) => `${k}: ${v}`).join("; ").slice(0, 1200)}
 Build this week's lessons around the term theme and goals.`;
   }
-  const profile = `Child profile
+  const profile = `${isPro ? `Student profile (planned by a ${user.user_metadata?.role || "teacher or therapist"}${child.setting ? `; setting: ${child.setting}` : ""})` : "Child profile"}
 - Name: ${child.name}
 - Age: ${age ?? "unknown"}
 - State: ${child.state}; framework: ${fw.name}; regulator: ${fw.regulator}
@@ -332,6 +345,43 @@ ${termNote}`;
     throw new Error("planner failed");
   }
 
+  // ---------- Session plan (professionals): one session, optionally a small group ----------
+  if (isSession) {
+    const ids = (Array.isArray(group_ids) ? group_ids : []).filter((x: unknown) => typeof x === "string" && x !== child_id).slice(0, 3);
+    let groupKids: any[] = [];
+    if (ids.length) { const { data } = await userClient.from("children").select("*").in("id", ids); groupKids = data ?? []; }
+    const mins = Math.max(10, Math.min(180, Number(child.session_minutes) || 45));
+    const groupText = groupKids.length ? `\nThis is a GROUP session with ${groupKids.length + 1} students. The other students:\n` + groupKids.map((k: any) => `- ${k.name}: age ${ageFrom(k.birth_year) ?? "unknown"}; ${SUPPORT[k.support_level] ?? k.support_level}; communication: ${k.communication || "not stated"}; interests: ${(k.interests || []).join(", ") || "not stated"}; goals: ${k.goals || "none"}; working levels: ${Object.entries(k.levels ?? {}).map(([x, y]) => `${x} ${y}`).join(", ") || "not set"}`).join("\n") + `\nPlan shared activities that work for everyone, and in each activity's "adjustments" say how it differs for each student, by initials.` : "";
+    const sesPrompt = `${profile}${groupText}
+
+Plan one ${mins}-minute ${groupKids.length ? "group " : ""}session for ${week_start || "today"}.
+- Structure: a short settling or regulation start, then 3 to 5 activities, then a calm finish. Activity minutes add up to about ${mins}.
+- For each activity: title, learning areas, minutes, an observable goal, a hook using interests, materials, 3 to 5 steps, the communication to model, adjustments, and "evidence" = the data to record (for example trials correct out of 5, prompt level).
+- For low support and advanced learners, include a short "teach" explanation and key words.
+- Also give: a short title, a two-sentence summary, 2 to 4 focus goals for the session, one regulation suggestion, and one home practice idea a family can do in 5 minutes.`;
+    const sesSchema = { type: "object", properties: { title: str, summary: str, focus_goals: { type: "array", items: str }, regulation: str, home_practice: str, lessons: { type: "array", items: lessonSchema, minItems: 2 } }, required: ["title", "lessons"] };
+    const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start: week_start || new Date().toISOString().slice(0, 10) }).select("id").single();
+    if (jobErr || !job) return json({ error: "Couldn't start planning. Please try again." }, 500);
+    const setJob = (f: Record<string, unknown>) => admin.from("plan_jobs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", job.id);
+    const work = async () => {
+      try {
+        const out = obj(await callTool(sesPrompt, "save_session", sesSchema, 9000, (d) => arr(d?.lessons).length > 0));
+        const plan = clean({ title: out.title, summary: out.summary, focus_goals: out.focus_goals, days: [{ day: "Session", regulation: out.regulation, lessons: out.lessons }] }, fw.areas);
+        if (!plan.days[0]?.lessons.length) { await setJob({ status: "failed", error: "The session came back empty. Please try again." }); return; }
+        await admin.from("generations").insert({ parent_id: user!.id, kind: KIND });
+        const { data: saved, error } = await admin.from("plans").insert({
+          parent_id: user!.id, child_id, week_start: week_start || new Date().toISOString().slice(0, 10), title: plan.title, source: "ai", group_ids: groupKids.map((k: any) => k.id),
+          content: { ...plan, kind: "session", home_practice: String(out.home_practice ?? "").slice(0, 600), group: groupKids.length ? [child.name, ...groupKids.map((k: any) => k.name)] : [], session_minutes: mins, framework: fw.name, areas: fw.areas, targets: null, daily_minutes: mins },
+        }).select("id").single();
+        if (error || !saved) { console.error("Session save failed", error); await setJob({ status: "failed", error: "Couldn't save the session. Please try again." }); return; }
+        await setJob({ status: "done", plan_id: saved.id, progress: 5 });
+      } catch (e) { console.error("Session failed", e); await setJob({ status: "failed", error: "The planner had a problem. Please try again in a minute." }); }
+    };
+    // @ts-ignore EdgeRuntime is provided by Supabase
+    EdgeRuntime.waitUntil(work().finally(recordUsage));
+    return json({ job_id: job.id }, 202);
+  }
+
   // ---------- Worksheet: printable practice for any subject, level and topic ----------
   if (isSheet) {
     const subj = String(ws.subject).slice(0, 80), lvl = String(ws.level || child.levels?.[ws.subject] || "").slice(0, 60), topic = String(ws.topic).slice(0, 200);
@@ -385,7 +435,7 @@ Rules:
   if (isReport) {
     const rPrompt = `${profile}
 
-Write ${child.name}'s home education progress report for ${from} to ${to}, for the parent to give to ${fw.regulator}.
+${audience === "parent" ? `Write ${child.name}'s progress report for ${from} to ${to}, from their ${user.user_metadata?.role || "teacher"} to their parents and carers.` : audience === "team" ? `Write ${child.name}'s progress report for ${from} to ${to}, for the school or therapy team.` : `Write ${child.name}'s home education progress report for ${from} to ${to}, for the parent to give to ${fw.regulator}.`}
 Use ONLY these records from the family's app. Don't invent results, test scores or events. If a learning area has few records, say so honestly and briefly.
 
 ${String(facts).slice(0, 12000)}
@@ -397,7 +447,7 @@ Sections, in this order, with these exact headings:
 4. Wellbeing and social interaction: regulation, community outings and social contact shown in the records.
 5. Next steps: 3 to 5 bullet points for the next period.
 
-Write as the parent, first person, plain Australian English, respectful and neuro-affirming. Short paragraphs, "- " bullets, no markdown headings or bold.`;
+${audience === "parent" ? `Write as the professional ("I" or "we") to the family: warm, plain English with no jargon or acronyms, celebrate progress honestly, and make the next steps practical, including one or two ideas to try at home.` : audience === "team" ? `Write as the professional, concise and objective, using the data (help levels, counts, time) and noting what to adjust.` : `Write as the parent, first person.`} Plain Australian English, respectful and neuro-affirming. Short paragraphs, "- " bullets, no markdown headings or bold.`;
     const rSchema = { type: "object", properties: { sections: { type: "array", minItems: 5, items: { type: "object", properties: { heading: { type: "string" }, body: { type: "string" } }, required: ["heading", "body"] } } }, required: ["sections"] };
     const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start: to }).select("id").single();
     if (jobErr || !job) return json({ error: "Couldn't start writing. Please try again." }, 500);
@@ -461,7 +511,7 @@ Also give the year a short title and a two-sentence summary for the parent. Keep
 
   // ---------- Registration pack: the written education program each state asks for ----------
   if (isProgram) {
-    const spec = PROGRAM_DOCS[child.state] ?? PROGRAM_DOCS.WA;
+    const spec = isPro ? GOAL_DOC : (PROGRAM_DOCS[child.state] ?? PROGRAM_DOCS.WA);
     const a = (k: string) => String(answers?.[k] ?? "").slice(0, 600);
     const areaHours = Object.entries(rec.targets).map(([ar, m]) => `${ar} about ${Math.round(Number(m) / 60 * 10) / 10} h`).join("; ");
     const progPrompt = `${profile}
@@ -489,17 +539,39 @@ Rules:
 - Keep medical detail out: describe needs in general terms only.
 - Don't invent facts about the family. Where something is unknown, write a short line the parent can fill in, in square brackets.
 - Mention that weekly plans, learning time by area, progress records, notes, photos and videos are kept in the Spectrum Home Ed app.`;
+    const goalPrompt = `${profile}
+
+Write a goal plan (an individual learning plan, like an IEP or ILP) for student ${child.name} for ${a("start") || "the coming term"}, written by their ${user.user_metadata?.role || "teacher"} for the school or therapy team and the family.
+Curriculum framework: ${fw.name}. Learning areas: ${fw.areas.join(", ")}.
+
+Information from the professional:
+- Setting: ${a("where") || child.setting || "not stated"}
+- How often they see the student: ${a("routine") || "not stated"}
+- Programs and resources in use: ${a("resources") || "not stated"}
+- Team (roles): ${a("social") || "not stated"}
+- Current adjustments and supports: ${a("supports") || "not stated"}
+- Priorities from the family or team: ${a("other") || "none"}
+
+Write these sections, in this order, using exactly these headings:
+${GOAL_DOC.sections.map((x, i) => `${i + 1}. ${x[0]}: ${x[1]}`).join("\n")}
+
+Rules:
+- Write as the team ("we"), in plain Australian English, concise and professional. Short paragraphs and "- " bullet points. No markdown headings, bold or tables inside a section.
+- Goals must be specific, observable and achievable this period, pitched at the student's real level, using their interests.
+- Use respectful, neuro-affirming language. Treat AAC, signs, gestures and scripts as real communication. Avoid compliance-only goals.
+- Keep medical detail out. Refer to the student only by ${child.name}.
+- Don't invent facts. Where something is unknown, leave a short [square bracket] note to fill in.`;
     const progSchema = { type: "object", properties: { sections: { type: "array", minItems: spec.sections.length, items: { type: "object", properties: { heading: { type: "string" }, body: { type: "string" } }, required: ["heading", "body"] } } }, required: ["sections"] };
     const { data: job, error: jobErr } = await admin.from("plan_jobs").insert({ parent_id: user.id, child_id, week_start: new Date().toISOString().slice(0, 10) }).select("id").single();
     if (jobErr || !job) return json({ error: "Couldn't start writing. Please try again." }, 500);
     const setJob = (f: Record<string, unknown>) => admin.from("plan_jobs").update({ ...f, updated_at: new Date().toISOString() }).eq("id", job.id);
     const work = async () => {
       try {
-        const out = obj(await callTool(progPrompt, "save_program", progSchema, 12000, (d) => arr(d?.sections).length >= 3));
+        const out = obj(await callTool(isPro ? goalPrompt : progPrompt, "save_program", progSchema, 12000, (d) => arr(d?.sections).length >= 3));
         const sections = arr(out.sections).map(obj).map((x: any) => ({ heading: String(x.heading ?? "").slice(0, 120), body: String(x.body ?? "").slice(0, 6000) })).filter((x: any) => x.heading && x.body);
         if (!sections.length) { await setJob({ status: "failed", error: "The program came back empty. Please try again." }); return; }
         await admin.from("generations").insert({ parent_id: user!.id, kind: KIND });
-        const { data: saved, error } = await admin.from("programs").insert({ parent_id: user!.id, child_id, state: child.state, title: `${child.name}'s ${spec.doc}`, content: { doc_name: spec.doc, sections, answers } }).select("id").single();
+        const { data: saved, error } = await admin.from("programs").insert({ parent_id: user!.id, child_id, state: child.state, title: isPro ? `Goal plan: ${child.name}${a("start") ? ` (${a("start")})` : ""}` : `${child.name}'s ${spec.doc}`, content: { doc_name: spec.doc, sections, answers, pro: isPro } }).select("id").single();
         if (error || !saved) { console.error("Program save failed", error); await setJob({ status: "failed", error: "Couldn't save the program. Please try again." }); return; }
         await setJob({ status: "done", program_id: saved.id, progress: 5 });
       } catch (e) { console.error("Program failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }

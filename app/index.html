@@ -203,7 +203,8 @@ if (LIVE) {
   db = {
     sb,
     async session(){ const { data } = await sb.auth.getSession(); return data.session?.user || null; },
-    async signUp(email, password){ const r = await sb.auth.signUp({ email, password, options:{ emailRedirectTo: location.origin + location.pathname } }); if (r.error) throw r.error; return r.data; },
+    async signUp(email, password, meta){ const r = await sb.auth.signUp({ email, password, options:{ emailRedirectTo: location.origin + location.pathname, data: meta || {} } }); if (r.error) throw r.error; return r.data; },
+    async setAccount(meta){ const r = await sb.auth.updateUser({ data: meta }); if (r.error) throw r.error; return r.data.user; },
     async signIn(email, password){ const r = await sb.auth.signInWithPassword({ email, password }); if (r.error) throw r.error; return r.data.user; },
     async reset(email){ const r = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }); if (r.error) throw r.error; },
     async newPassword(password){ const r = await sb.auth.updateUser({ password }); if (r.error) throw r.error; },
@@ -212,7 +213,12 @@ if (LIVE) {
     async child(id){ return must(await sb.from("children").select("*").eq("id", id).single()); },
     async saveChild(c){ const { id, ...rest } = c; return id ? must(await sb.from("children").update(rest).eq("id", id).select().single()) : must(await sb.from("children").insert(rest).select().single()); },
     async deleteChild(id){ await this.purgeEvidence("child_id", id); must(await sb.from("children").delete().eq("id", id)); },
-    async plans(childId){ return must(await sb.from("plans").select("id,child_id,week_start,title,source,created_at").eq("child_id", childId).order("week_start", { ascending:false })); },
+    async plans(childId){ return must(await sb.from("plans").select("id,child_id,week_start,title,source,created_at,group_ids,kind:content->>kind").or(`child_id.eq.${childId},group_ids.cs.{${childId}}`).order("week_start", { ascending:false })); },
+    async writeSession(child, date, focus, extra, groupIds){
+      const r = await sb.functions.invoke("generate-plan", { body:{ kind: "session", child_id: child.id, week_start: date, focus, extra, group_ids: groupIds || [] } });
+      if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
+      const j = await this.waitJob(r.data.job_id); return { id: j.plan_id };
+    },
     async plan(id){ return must(await sb.from("plans").select("*").eq("id", id).single()); },
     async savePlanContent(id, content){ return must(await sb.from("plans").update({ content, title: content.title }).eq("id", id).select().single()); },
     async deletePlan(id){ await this.purgeEvidence("plan_id", id); must(await sb.from("plans").delete().eq("id", id)); },
@@ -288,8 +294,8 @@ if (LIVE) {
     async reports(childId){ return must(await sb.from("reports").select("*").eq("child_id", childId).order("created_at", { ascending:false })); },
     async saveReport(id, content){ return must(await sb.from("reports").update({ content, updated_at: new Date().toISOString() }).eq("id", id).select().single()); },
     async deleteReport(id){ must(await sb.from("reports").delete().eq("id", id)); },
-    async writeReport(child, from, to, facts){
-      const r = await sb.functions.invoke("generate-plan", { body:{ kind: "report", child_id: child.id, from, to, facts } });
+    async writeReport(child, from, to, facts, audience){
+      const r = await sb.functions.invoke("generate-plan", { body:{ kind: "report", child_id: child.id, from, to, facts, audience } });
       if (r.error) { let msg = r.error.message, code; try { const b = await r.error.context.json(); if (b.error) msg = b.error; code = b.code; } catch(e){} const err = new Error(msg); err.code = code; throw err; }
       return this.waitJob(r.data.job_id);
     },
@@ -360,6 +366,10 @@ if (LIVE) {
 const age = y => y ? (new Date().getFullYear() - y) : null;
 function mondayOf(dt){ const d = new Date(dt); const day = d.getDay(); const diff = day === 0 ? 1 : (day === 1 ? 0 : 8 - day); d.setDate(d.getDate() + diff); return d; }
 const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const IS_PRO = () => user?.user_metadata?.account_type === "pro";
+const KID = (pl) => IS_PRO() ? (pl ? "students" : "student") : (pl ? "children" : "child");
+const PRO_ROLES = ["Classroom teacher", "Special education teacher", "Education assistant", "Speech pathologist", "Occupational therapist", "Psychologist or behaviour support", "Tutor", "Other"];
+const SETTINGS = ["Classroom", "Small group or withdrawal", "Therapy sessions", "Tutoring", "Home visits", "Other"];
 const daysTo = d => Math.round((new Date(d).setHours(0,0,0,0) - new Date().setHours(0,0,0,0)) / 864e5);
 const whenTxt = d => { const n = daysTo(d); return n < 0 ? `${-n} day${n === -1 ? "" : "s"} overdue` : n === 0 ? "today" : n <= 60 ? `in ${n} day${n === 1 ? "" : "s"}` : `by ${d.toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" })}`; };
 const dueRow = d => { const n = daysTo(d.due), cls = d.info ? "" : n < 0 ? "late" : n <= 30 ? "soon" : ""; return `<li class="due ${cls}"><b>${esc(d.title)}</b> <span class="muted">${d.info ? d.due.toLocaleDateString("en-AU", { day:"numeric", month:"short", year:"numeric" }) : whenTxt(d.due)}</span></li>`; };
@@ -372,9 +382,13 @@ async function guard(fn){ try { await fn(); } catch(e){ console.error(e); view.i
 /* ---------- views ---------- */
 function authView(mode = "in"){
   view.innerHTML = `<div class="authbox stack">
-    <div class="stack" style="gap:8px"><h1>${mode === "up" ? "Create your family account" : mode === "reset" ? "Reset your password" : "Welcome back"}</h1>
-    <p class="muted">${mode === "up" ? "Free to start. Set up a profile for each child and get a personalised weekly plan." : mode === "reset" ? "We'll email you a link to set a new password." : "Sign in to see your children's plans."}</p></div>
+    <div class="stack" style="gap:8px"><h1>${mode === "up" ? "Create your account" : mode === "reset" ? "Reset your password" : "Welcome back"}</h1>
+    <p class="muted">${mode === "up" ? "Free to start. Set up a profile for each learner and get a personalised plan." : mode === "reset" ? "We'll email you a link to set a new password." : "Sign in to see your plans."}</p></div>
     <form class="card stack" id="authForm" novalidate>
+      ${mode === "up" ? `<div class="stack" style="gap:8px"><b>I'm a…</b><div class="levels">
+        <label class="level"><input type="radio" name="atype" value="family" checked><span><b>Parent or carer</b><span>Home educating, or supporting my own child's learning</span></span></label>
+        <label class="level"><input type="radio" name="atype" value="pro"><span><b>Teacher, therapist or education professional</b><span>Planning for students I work with</span></span></label></div></div>
+        <div class="grid2" id="proBox" hidden><label class="f">Your role <select id="aRole">${PRO_ROLES.map(r => `<option>${r}</option>`).join("")}</select></label><label class="f">School, practice or organisation <small>Optional</small><input type="text" id="aOrg" maxlength="80"></label></div>` : ""}
       <label class="f">Email <input type="email" id="aEmail" autocomplete="email" required></label>
       ${mode !== "reset" ? `<label class="f">Password <small>At least 8 characters</small><input type="password" id="aPass" autocomplete="${mode === "up" ? "new-password" : "current-password"}" minlength="8" required></label>` : ""}
       <p class="small" id="aMsg" role="alert"></p>
@@ -383,6 +397,7 @@ function authView(mode = "in"){
     </form>
     <p class="row small">${mode === "in" ? `<a href="#/signup">Create an account</a> · <a href="#/reset">Forgot password?</a>` : `<a href="#/signin">I already have an account</a>`}</p>
   </div>`;
+  document.querySelectorAll("input[name=atype]").forEach(r => r.onchange = () => { $("proBox").hidden = document.querySelector("input[name=atype]:checked").value !== "pro"; });
   $("authForm").onsubmit = async e => {
     e.preventDefault();
     const email = $("aEmail").value.trim(), pass = $("aPass")?.value || "";
@@ -391,7 +406,9 @@ function authView(mode = "in"){
     if (mode !== "reset" && pass.length < 8) { msg.textContent = "Passwords need at least 8 characters."; return; }
     $("aGo").disabled = true;
     try {
-      if (mode === "up") { const r = await db.signUp(email, pass); if (r.session) { user = r.user; location.hash = "#/child/new"; route(); } else { msg.style.color = "var(--good)"; msg.textContent = "Check your email and tap the link to confirm your account, then sign in."; } }
+      if (mode === "up") { const pro = document.querySelector("input[name=atype]:checked")?.value === "pro";
+        const meta = pro ? { account_type: "pro", role: $("aRole").value, organisation: $("aOrg").value.trim() || null } : { account_type: "family" };
+        const r = await db.signUp(email, pass, meta); if (r.session) { user = r.user; location.hash = pro ? "#/" : "#/child/new"; route(); } else { msg.style.color = "var(--good)"; msg.textContent = "Check your email and tap the link to confirm your account, then sign in."; } }
       else if (mode === "reset") { await db.reset(email); msg.style.color = "var(--good)"; msg.textContent = "If that email has an account, a reset link is on its way."; }
       else { user = await db.signIn(email, pass); if (location.hash !== "#/admin") location.hash = "#/"; route(); }
     } catch(err) { msg.textContent = err.message === "Invalid login credentials" ? "That email and password don't match. Try again or reset your password." : err.message; }
@@ -413,28 +430,41 @@ function accessLabel(a){
 async function homeView(){
   const [kids, acc] = await Promise.all([db.children(), db.access()]);
   try { acc.is_admin ? localStorage.setItem("she-admin", "1") : localStorage.removeItem("she-admin"); } catch(e){}
+  const pro = IS_PRO(), limit = acc.is_admin ? 999 : pro ? 15 : 3, full = LIVE && kids.length >= limit;
   view.innerHTML = `<div class="stack">${banner()}
-    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>Your family</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span><a class="small" href="#/billing">Account and billing</a>${acc.is_admin ? `<a class="small" href="#/admin">Admin dashboard</a>` : ""}</div>` : ""}</div><a class="btn primary" href="#/child/new">Add a child</a></div>
+    ${LIVE && pro && !user?.user_metadata?.pro_consent_at ? `<div class="card stack" style="border-color:var(--accent)"><h2>Before you add students</h2>
+      <p>Student information is private. Please use <b>initials or a nickname</b>, not full names, and keep details general.</p>
+      <label class="row" style="align-items:flex-start;gap:10px"><input type="checkbox" id="proOk" style="width:22px;height:22px;flex:none"> <span>I have permission to use my students' information here: consent from each student's parent or guardian, or my school or practice's approval. I'll follow my employer's privacy and technology policies.</span></label>
+      <div><button class="btn primary" type="button" id="proOkGo">Continue</button></div><p class="small muted">Some schools and education departments only allow approved apps for student information. Check with your school if you're not sure.</p></div>` : ""}
+    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:6px"><h1>${pro ? "Your students" : "Your family"}</h1>${LIVE ? `<div class="row"><span class="chip">${esc(accessLabel(acc))}</span><a class="small" href="#/billing">Account and billing</a>${acc.is_admin ? `<a class="small" href="#/admin">Admin dashboard</a>` : ""}</div>` : ""}</div>${full ? `<span class="small muted">${kids.length} of ${limit} ${KID(true)}</span>` : `<a class="btn primary" href="#/child/new">Add a ${KID()}</a>`}</div>
     ${kids.length ? `<div class="kids">${kids.map(k => `<a class="card kid" href="#/child/${k.id}">
         <div class="row" style="justify-content:space-between"><h2>${esc(k.name)}</h2><span class="chip">${esc(k.state)}</span></div>
         <p class="muted small">${age(k.birth_year) ? `Age ${age(k.birth_year)} · ` : ""}${esc(SUP[k.support_level]?.label || "")}</p>
         <div class="chips">${(k.interests||[]).slice(0,5).map(i => `<span class="chip">${esc(i)}</span>`).join("")}</div>
-        ${(() => { const n = (window.SHE_deadlines?.(k) || []).find(d => !d.info); const pr = window.SHE_guideProgress?.(k); return n ? `<p class="small"><b>Next:</b> ${esc(n.title)}, ${whenTxt(n.due)}</p>` : pr && pr.total && pr.done < pr.total ? `<p class="small"><b>Registration:</b> ${pr.done} of ${pr.total} steps done</p>` : ""; })()}
+        ${pro ? (k.setting ? `<p class="small">${esc(k.setting)}</p>` : "") : (() => { const n = (window.SHE_deadlines?.(k) || []).find(d => !d.info); const pr = window.SHE_guideProgress?.(k); return n ? `<p class="small"><b>Next:</b> ${esc(n.title)}, ${whenTxt(n.due)}</p>` : pr && pr.total && pr.done < pr.total ? `<p class="small"><b>Registration:</b> ${pr.done} of ${pr.total} steps done</p>` : ""; })()}
         <span class="small" style="color:var(--accent);font-weight:700">Open plans →</span></a>`).join("")}</div>`
+      : pro ? `<div class="card empty stack"><h2>Add your first student</h2><p>Use initials or a nickname. Tell us what they love, how they communicate and what you're working on, and we'll build session plans, weekly plans, goal plans and worksheets around them.</p><p><a class="btn primary" href="#/child/new">Add a student</a></p></div>`
       : `<div class="card empty stack"><h2>Start with your child</h2><p>Tell us what your child loves and how they communicate, and we'll build their first week of lessons around it.</p><p><a class="btn primary" href="#/child/new">Add your first child</a></p></div>`}
   </div>`;
+  if ($("proOkGo")) $("proOkGo").onclick = async () => { if (!$("proOk").checked) { toast("Tick the box to confirm first"); return; } try { user = await db.setAccount({ pro_consent_at: new Date().toISOString() }); homeView(); } catch(e){ toast(e.message); } };
 }
 
 async function childFormView(id){
   const c = id ? await db.child(id) : { name:"", birth_year:"", state:"WA", support_level:"high", communication:"", interests:[], sensory_notes:"", goals:"", minutes_per_day:180, time_mode:"recommended", time_reason:"" };
   let interests = [...(c.interests || [])];
+  const pro = IS_PRO();
+  if (LIVE && pro && !user?.user_metadata?.pro_consent_at) { location.hash = "#/"; return; }
+  if (LIVE && !id) { const [kids, acc] = await Promise.all([db.children(), db.access()]); const limit = acc.is_admin ? 999 : pro ? 15 : 3;
+    if (kids.length >= limit) { view.innerHTML = `<div class="card stack"><h2>You've reached ${limit} ${KID(true)}</h2><p>Your plan includes up to ${limit} ${KID(true)}. ${pro ? "Remove a student you no longer work with to add another, or email hello@spectrumhomeed.com about a larger plan." : "Remove a profile to add another, or email hello@spectrumhomeed.com."}</p><p><a href="#/">← Back</a></p></div>`; return; } }
   view.innerHTML = `<form class="stack" id="cForm" novalidate>${banner()}
-    <h1>${id ? `Edit ${esc(c.name)}'s profile` : "Add a child"}</h1>
+    <h1>${id ? `Edit ${esc(c.name)}'s profile` : `Add a ${KID()}`}</h1>
     <div class="card stack">
       <div class="grid2">
-        <label class="f">First name or nickname <input type="text" id="cName" value="${esc(c.name)}" maxlength="40" required></label>
+        ${pro ? `<label class="f">Initials or nickname <small>Not their full name, for privacy</small><input type="text" id="cName" value="${esc(c.name)}" maxlength="12" required placeholder="e.g. J.T."></label>` : `<label class="f">First name or nickname <input type="text" id="cName" value="${esc(c.name)}" maxlength="40" required></label>`}
         <label class="f">Year of birth <input type="number" id="cYear" value="${esc(c.birth_year || "")}" min="1990" max="${new Date().getFullYear()}" inputmode="numeric"></label>
       </div>
+      ${pro ? `<div class="grid2"><label class="f">Where you work with them <select id="cSetting">${SETTINGS.map(x => `<option ${c.setting === x ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+        <label class="f">Usual session length <small>For session plans</small><select id="cSess">${[20,30,45,60,90].map(m => `<option value="${m}" ${(+c.session_minutes || 45) === m ? "selected" : ""}>${m} minutes</option>`).join("")}</select></label></div>` : ""}
       <label class="f">State or territory <small>Plans follow your state's curriculum framework</small>
         <select id="cState">${Object.entries(FW).map(([k,v]) => `<option value="${k}" ${c.state === k ? "selected" : ""}>${v.label}</option>`).join("")}</select></label>
     </div>
@@ -449,7 +479,7 @@ async function childFormView(id){
         <div class="chips" id="intChips"></div>
         <div class="row"><input type="text" id="cInt" maxlength="60" style="flex:1;min-width:0" placeholder="e.g. game shows"><button class="btn quiet small" type="button" id="intAdd">Add</button></div></div>
       <label class="f">Sensory notes <small>What helps them feel calm, and what overwhelms them</small><textarea id="cSens" maxlength="500">${esc(c.sensory_notes || "")}</textarea></label>
-      <label class="f">Your goals <small>What matters most right now, including therapy goals</small><textarea id="cGoals" maxlength="500">${esc(c.goals || "")}</textarea></label>
+      <label class="f">${pro ? "Goals you're working on" : "Your goals"} <small>${pro ? "From their support plan, therapy goals or your own priorities" : "What matters most right now, including therapy goals"}</small><textarea id="cGoals" maxlength="500">${esc(c.goals || "")}</textarea></label>
     </div>
     <div class="card stack"><h3>Learning time</h3>
       <p class="muted small" id="recText"></p>
@@ -490,6 +520,7 @@ async function childFormView(id){
     const rec = { name, birth_year: isNaN(y) ? null : y, state: $("cState").value, support_level: document.querySelector("input[name=lvl]:checked")?.value || "high",
       communication: $("cComm").value.trim(), interests, sensory_notes: $("cSens").value.trim(), goals: $("cGoals").value.trim(),
       time_mode: document.querySelector("input[name=tmode]:checked")?.value || "recommended", time_reason: $("cReason").value.trim() || null };
+    if (pro) { rec.setting = $("cSetting").value; rec.session_minutes = +$("cSess").value; }
     const areasNow = (FW[rec.state] || FW.WA).areas; rec.levels = Object.fromEntries(Object.entries(levels).filter(([a]) => areasNow.includes(a)));
     rec.minutes_per_day = rec.time_mode === "adjusted" ? +$("cMin").value : window.SHE_dailyMinutes(rec);
     if (id) rec.id = id;
@@ -499,19 +530,31 @@ async function childFormView(id){
 
 async function childView(id){
   const yr = new Date().getFullYear(), ti = termIndex(new Date());
-  const [c, plans, progs, yp] = await Promise.all([db.child(id), db.plans(id), db.programs(id), db.yearPlan(id, yr).catch(() => null)]);
+  const pro = IS_PRO();
+  const [c, plans, progs, yp, all] = await Promise.all([db.child(id), db.plans(id), db.programs(id), db.yearPlan(id, yr).catch(() => null), pro ? db.children() : Promise.resolve([])]);
+  const others = all.filter(k => k.id !== id);
   const fw = FW[c.state] || FW.WA;
   const wk = iso(mondayOf(new Date()));
   view.innerHTML = `<div class="stack">${banner()}
-    <p class="small"><a href="#/">← Your family</a></p>
-    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:4px"><h1>${esc(c.name)}</h1><p class="muted">${age(c.birth_year) ? `Age ${age(c.birth_year)} · ` : ""}${esc(SUP[c.support_level]?.label)} · ${esc(fw.name)}</p></div><a class="btn quiet" href="#/child/${id}/edit">Edit profile</a></div>
+    <p class="small"><a href="#/">← ${pro ? "Your students" : "Your family"}</a></p>
+    <div class="row" style="justify-content:space-between"><div class="stack" style="gap:4px"><h1>${esc(c.name)}</h1><p class="muted">${age(c.birth_year) ? `Age ${age(c.birth_year)} · ` : ""}${esc(SUP[c.support_level]?.label)} · ${esc(fw.name)}${pro && c.setting ? ` · ${esc(c.setting)}` : ""}</p></div><a class="btn quiet" href="#/child/${id}/edit">Edit profile</a></div>
     <div class="chips">${(c.interests||[]).map(i => `<span class="chip">${esc(i)}</span>`).join("") || `<span class="muted small">Add favourite things to their profile for better plans.</span>`}</div>
-    ${(() => { const g = window.SHE_GUIDES?.[c.state]; if (!g) return ""; const pr = window.SHE_guideProgress(c), dl = window.SHE_deadlines(c).slice(0, 3);
+    ${pro && LIVE ? `<form class="card stack" id="sesForm"><h2>Plan a session</h2>
+      <div class="grid2"><label class="f">Date <input type="date" id="sDate" value="${iso(new Date())}" required></label>
+        <label class="f">Focus <small>Optional</small><input type="text" id="sFocus" maxlength="200" placeholder="e.g. requesting with AAC, turn-taking, place value"></label></div>
+      ${others.length ? `<div class="stack" style="gap:6px"><b>Group session? <span class="muted small" style="font-weight:400">Add up to 3 more students</span></b><div class="chips">${others.map(k => `<label class="chip" style="cursor:pointer"><input type="checkbox" name="grp" value="${k.id}"> ${esc(k.name)}</label>`).join("")}</div></div>` : ""}
+      <label class="f">Anything else? <small>Optional: materials you have, what worked last time</small><textarea id="sExtra" maxlength="500"></textarea></label>
+      <div class="row"><button class="btn primary" type="submit" id="sGo">Plan the session</button><span id="sWait" hidden><span class="spinner"></span> Planning. About a minute.</span></div>
+      <p id="sMsg" role="alert" style="color:var(--bad)"></p></form>
+    <div class="card stack"><h2>Goal plan</h2><p class="small muted">An individual learning plan: strengths, priority goals, measurable objectives, adjustments and how progress is reviewed. Useful for support plans and team meetings.</p>
+      ${progs.length ? `<div class="plans">${progs.map(p => `<a class="planrow" href="#/program/${p.id}"><span><b>${esc(p.title || "Goal plan")}</b><br><span class="muted small">Written ${nice(iso(new Date(p.created_at)))}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : ""}
+      <div><a class="btn ${progs.length ? "quiet" : ""}" href="#/child/${id}/program">${progs.length ? "Write a new version" : `Write ${esc(c.name)}'s goal plan`}</a></div></div>` : ""}
+    ${pro ? "" : (() => { const g = window.SHE_GUIDES?.[c.state]; if (!g) return ""; const pr = window.SHE_guideProgress(c), dl = window.SHE_deadlines(c).slice(0, 3);
       return `<a class="card stack reqcard" href="#/child/${id}/guide"><div class="row" style="justify-content:space-between"><h2>${esc(g.name)} requirements</h2><span class="chip">${pr.done} of ${pr.total} steps</span></div>
         <div class="progress"><i style="width:${pr.total ? Math.round(pr.done / pr.total * 100) : 0}%"></i></div>
         ${dl.length ? `<ul class="dues">${dl.map(dueRow).join("")}</ul>` : `<p class="small muted">${c.reg_date ? "No deadlines coming up." : "Add your registration date in the guide to see your deadlines."}</p>`}
         <span class="small" style="color:var(--accent);font-weight:700">Open the step-by-step guide →</span></a>`; })()}
-    ${LIVE && window.SHE_GUIDES?.[c.state] ? `<div class="card stack"><div class="row" style="justify-content:space-between"><h2>Registration pack</h2></div>
+    ${LIVE && !pro && window.SHE_GUIDES?.[c.state] ? `<div class="card stack"><div class="row" style="justify-content:space-between"><h2>Registration pack</h2></div>
       <p class="small muted">The written ${esc(PACK_NAME[c.state] || "education program")} ${esc(window.SHE_GUIDES[c.state].name)} asks for, drafted from ${esc(c.name)}'s profile. You check and edit it before sending.</p>
       ${progs.length ? `<div class="plans">${progs.map(p => `<a class="planrow" href="#/program/${p.id}"><span><b>${esc(p.title || "Program")}</b><br><span class="muted small">Written ${nice(iso(new Date(p.created_at)))}${p.updated_at && iso(new Date(p.updated_at)) !== iso(new Date(p.created_at)) ? ` · edited ${nice(iso(new Date(p.updated_at)))}` : ""}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : ""}
       <div><a class="btn ${progs.length ? "quiet" : "primary"}" href="#/child/${id}/program">${progs.length ? "Write a new version" : `Write ${esc(c.name)}'s ${esc(PACK_NAME[c.state] || "program")}`}</a></div></div>` : ""}
@@ -521,7 +564,7 @@ async function childView(id){
         : `<p class="small muted">Plan the whole year in 4 terms, each with a theme built on ${esc(c.name)}'s interests, goals, and a focus for every learning area. Weekly plans then follow the term.</p><div><a class="btn quiet" href="#/child/${id}/year/${yr}">Plan ${esc(c.name)}'s ${yr}</a></div>`}
       ${new Date().getMonth() >= 9 ? `<p class="small"><a href="#/child/${id}/year/${yr + 1}">Plan ${yr + 1} →</a></p>` : ""}</div>`; })() : ""}
     ${LIVE ? `<a class="card stack reqcard" href="#/child/${id}/worksheets"><h2>Worksheets</h2><p class="small muted">Printable practice for any subject and topic, at ${esc(c.name)}'s level and themed on their interests, with an answer key.</p><span class="small" style="color:var(--accent);font-weight:700">Make a worksheet →</span></a>` : ""}
-    ${LIVE ? `<a class="card stack reqcard" href="#/child/${id}/report"><h2>Progress report</h2><p class="small muted">Everything you've recorded, organised by learning area with photos and a written summary, ready for your ${c.state === "WA" ? "moderator" : "review or report"}.</p><span class="small" style="color:var(--accent);font-weight:700">Open the report →</span></a>` : ""}
+    ${LIVE ? `<a class="card stack reqcard" href="#/child/${id}/report"><h2>Progress report</h2><p class="small muted">Everything you've recorded, organised by learning area with photos and a written summary, ready for ${pro ? "parents or your team" : `your ${c.state === "WA" ? "moderator" : "review or report"}`}.</p><span class="small" style="color:var(--accent);font-weight:700">Open the report →</span></a>` : ""}
     <form class="card stack" id="genForm">
       <h2>Plan a week</h2>
       <div class="grid2">
@@ -533,9 +576,15 @@ async function childView(id){
       <p id="gMsg" role="alert" style="color:var(--bad)"></p>
     </form>
     <div class="stack"><h2>Plans</h2>
-      ${plans.length ? `<div class="plans">${plans.map(p => `<a class="planrow" href="#/plan/${p.id}"><span><b>Week of ${nice(p.week_start)}</b><br><span class="muted small">${esc(p.title || "")}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : `<p class="muted">No plans yet. Create the first one above.</p>`}
+      ${plans.length ? `<div class="plans">${plans.map(p => `<a class="planrow" href="#/plan/${p.id}"><span><b>${p.kind === "session" ? `${(p.group_ids || []).length ? "Group session" : "Session"} · ${nice(p.week_start)}` : `Week of ${nice(p.week_start)}`}</b><br><span class="muted small">${esc(p.title || "")}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : `<p class="muted">No plans yet. Create the first one above.</p>`}
     </div>
   </div>`;
+  if ($("sesForm")) $("sesForm").onsubmit = async e => { e.preventDefault(); const date = $("sDate").value; if (!date) return;
+    const grp = [...document.querySelectorAll("input[name=grp]:checked")].map(x => x.value);
+    if (grp.length > 3) { $("sMsg").textContent = "A group can have up to 4 students, including this one."; return; }
+    $("sGo").disabled = true; $("sWait").hidden = false; $("sMsg").textContent = "";
+    try { const p = await db.writeSession(c, date, $("sFocus").value.trim(), $("sExtra").value.trim(), grp); location.hash = `#/plan/${p.id}`; }
+    catch(err){ $("sGo").disabled = false; $("sWait").hidden = true; $("sMsg").innerHTML = aiErr(err); } };
   $("genForm").onsubmit = async e => {
     e.preventDefault(); const week = $("gWeek").value; if (!week) return;
     $("gGo").disabled = true; $("gWait").hidden = false; $("gMsg").textContent = "";
@@ -574,7 +623,8 @@ async function planView(id, dayIdx = 0){
     </article>`; };
   view.innerHTML = `<div class="stack">${banner()}
     <p class="small noprint"><a href="#/child/${p.child_id}">← ${esc(c.name)}</a></p>
-    <div class="stack" style="gap:6px"><h1>${esc(ct.title || "Weekly plan")}</h1><p class="muted">${esc(c.name)} · Week of ${nice(p.week_start)} · ${esc(ct.framework || "")}</p></div>
+    <div class="stack" style="gap:6px"><h1>${esc(ct.title || "Weekly plan")}</h1><p class="muted">${ct.kind === "session" ? `${esc(ct.group?.length ? ct.group.join(", ") : c.name)} · ${ct.group?.length ? "Group session" : "Session"} · ${nice(p.week_start)}${ct.session_minutes ? ` · ${ct.session_minutes} minutes` : ""}` : `${esc(c.name)} · Week of ${nice(p.week_start)}`} · ${esc(ct.framework || "")}</p></div>
+    ${ct.home_practice ? `<div class="teach"><b>Home practice idea for families</b><p>${esc(ct.home_practice)}</p></div>` : ""}
     ${ct.summary ? `<p>${esc(ct.summary)}</p>` : ""}
     <div class="card stack"><div class="row" style="justify-content:space-between"><h3>This week's progress</h3><span class="small muted">${done} of ${total} lessons recorded</span></div><div class="progress"><i style="width:${total ? Math.round(done/total*100) : 0}%"></i></div></div>
     ${ct.focus_goals?.length ? `<div class="card stack"><h3>Focus goals</h3><ul style="margin:0;padding-left:20px">${ct.focus_goals.map(g => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
@@ -608,7 +658,7 @@ async function planView(id, dayIdx = 0){
         catch(err){ msg.textContent = err.message; }
       };
       if (c.media_consent_at) return go();
-      msg.innerHTML = `<span class="confirm" style="display:block">Photos and videos of ${esc(c.name)} are stored privately on Australian servers. Only you can see them, unless you choose to share a report. You can delete any of them at any time, and deleting ${esc(c.name)}'s profile deletes them all. Photos are shrunk and their location data is removed before upload. <a href="../privacy.html#children" target="_blank" rel="noopener">Privacy Policy</a><br><span class="row" style="margin-top:8px"><button class="btn primary small" type="button" data-ok>I agree, save it</button><button class="btn quiet small" type="button" data-no>Not now</button></span></span>`;
+      msg.innerHTML = IS_PRO() ? `<span class="confirm" style="display:block">Only add photos or videos of ${esc(c.name)} if their parent or guardian has given consent for photos, and your school or practice allows it. Photos are stored privately on Australian servers and only you can see them. Photos of work samples (without faces) are often the safest choice.<br><span class="row" style="margin-top:8px"><button class="btn primary small" type="button" data-ok>Consent is in place, save it</button><button class="btn quiet small" type="button" data-no>Not now</button></span></span>` : `<span class="confirm" style="display:block">Photos and videos of ${esc(c.name)} are stored privately on Australian servers. Only you can see them, unless you choose to share a report. You can delete any of them at any time, and deleting ${esc(c.name)}'s profile deletes them all. Photos are shrunk and their location data is removed before upload. <a href="../privacy.html#children" target="_blank" rel="noopener">Privacy Policy</a><br><span class="row" style="margin-top:8px"><button class="btn primary small" type="button" data-ok>I agree, save it</button><button class="btn quiet small" type="button" data-no>Not now</button></span></span>`;
       msg.querySelector("[data-no]").onclick = () => { msg.textContent = ""; };
       msg.querySelector("[data-ok]").onclick = async () => { try { await db.setMediaConsent(c.id); c.media_consent_at = new Date().toISOString(); go(); } catch(err){ msg.textContent = err.message; } };
     };
@@ -781,6 +831,7 @@ async function reportView(childId, from, to){
     <section class="card stack"><h2>Written summary</h2>
       ${rep ? rep.content.sections.map((x, i) => `<div class="stack psec" style="gap:6px"><h3>${esc(x.heading)}</h3><textarea class="noprint" data-i="${i}" rows="6">${esc(x.body)}</textarea><div class="printonly ptext">${esc(x.body)}</div></div>`).join("") + `<div class="row noprint"><button class="btn primary" type="button" id="rSave">Save changes</button></div>`
         : `<p class="small muted">${R.rows.length ? `We'll write a summary from ${esc(c.name)}'s records for this period: an overview, progress in each learning area, communication and independence, wellbeing and next steps. It only uses what you've recorded.` : "Record how lessons went on your weekly plans, and the summary will be written from those records."}</p>`}
+      ${R.rows.length && IS_PRO() ? `<label class="f noprint" style="max-width:360px">Write it for <select id="rAud"><option value="parent">Parents and carers (plain English)</option><option value="team">The school or therapy team</option></select></label>` : ""}
       ${R.rows.length ? `<div class="row noprint"><button class="btn ${rep ? "" : "primary"}" type="button" id="rWrite">${rep ? "Rewrite the summary" : "Write the summary"}</button><span id="rWait" hidden><span class="spinner"></span> Writing. Usually 1 to 2 minutes.</span></div><p id="rMsg" role="alert" style="color:var(--bad)"></p>` : ""}
     </section>
     <section class="card stack"><h2>Learning areas</h2>
@@ -798,7 +849,7 @@ async function reportView(childId, from, to){
   if (rep) { view.querySelectorAll("textarea[data-i]").forEach(t => { t.style.height = (t.scrollHeight + 4) + "px"; t.oninput = () => { rep.content.sections[+t.dataset.i].body = t.value; t.nextElementSibling.textContent = t.value; }; });
     $("rSave").onclick = async () => { try { await db.saveReport(rep.id, rep.content); toast("Saved"); } catch(e){ toast(e.message); } }; }
   if ($("rWrite")) $("rWrite").onclick = async () => { $("rWrite").disabled = true; $("rWait").hidden = false; $("rMsg").textContent = "";
-    try { await db.writeReport(c, from, to, R.facts); if (rep) await db.deleteReport(rep.id).catch(() => {}); reportView(childId, from, to); }
+    try { await db.writeReport(c, from, to, R.facts, $("rAud")?.value || "regulator"); if (rep) await db.deleteReport(rep.id).catch(() => {}); reportView(childId, from, to); }
     catch(err){ $("rWrite").disabled = false; $("rWait").hidden = true; $("rMsg").innerHTML = aiErr(err); } };
 }
 
@@ -847,19 +898,26 @@ async function yearView(childId, year){
 
 async function programFormView(childId){
   const c = await db.child(childId); const g = window.SHE_GUIDES[c.state] || {};
+  const pro = IS_PRO();
   const q = (k, label, hint, ph) => `<label class="f">${label} ${hint ? `<small>${hint}</small>` : ""}<textarea id="q_${k}" maxlength="600" rows="2" placeholder="${esc(ph || "")}"></textarea></label>`;
   view.innerHTML = `<form class="stack" id="pf">${banner()}
     <p class="small"><a href="#/child/${childId}">← ${esc(c.name)}</a></p>
-    <h1>${esc(c.name)}'s ${esc(PACK_NAME[c.state] || "program")}</h1>
+    <h1>${esc(c.name)}'s ${pro ? "goal plan" : esc(PACK_NAME[c.state] || "program")}</h1>
     <p class="muted">Answer what you can. Short answers are fine, and anything you skip is left as a [placeholder] you can fill in later. We already know ${esc(c.name)}'s interests, support level and goals from their profile.</p>
     <div class="card stack">
-      <label class="f">Starting <small>The year or date this program covers</small><input type="text" id="q_start" maxlength="40" value="${new Date().getMonth() >= 9 ? new Date().getFullYear() + 1 : new Date().getFullYear()}"></label>
-      ${q("where", "Where will learning mostly happen?", "", "At home, plus outings to the pool, library and shops")}
+      <label class="f">${pro ? "Period" : "Starting"} <small>${pro ? "e.g. Term 1 2027, or Semester 1" : "The year or date this program covers"}</small><input type="text" id="q_start" maxlength="40" value="${new Date().getMonth() >= 9 ? new Date().getFullYear() + 1 : new Date().getFullYear()}"></label>
+      ${pro ? `${q("where", "Setting", "Where and how you work with them", "Year 3 class with EA support; withdrawal for literacy 3 x 30 min a week")}
+      ${q("routine", "How often you see them", "", "Daily in class; speech therapy fortnightly")}
+      ${q("resources", "Programs and resources in use", "e.g. AAC system, reading program, visual schedule", "")}
+      ${q("social", "Who's in the team", "Roles only, no names", "Class teacher, EA, speech pathologist, parents")}
+      ${q("supports", "Current adjustments and supports", "General terms only, no medical details", "Visual timetable, movement breaks, reduced written output")}
+      ${q("other", "Priorities from the family or team", "Optional", "")}`
+      : `${q("where", "Where will learning mostly happen?", "", "At home, plus outings to the pool, library and shops")}
       ${q("routine", "What does a typical week look like?", "Rough times are fine", "Mornings for focused learning, afternoons for outings and hands-on activities")}
       ${q("resources", "Resources, programs and places you'll use", "Name them if you can: apps, books, programs, places", "")}
       ${q("social", "Social and community activities", "", "Swimming lessons, playgroup, visiting grandparents, church")}
       ${q("supports", "Therapies and supports", "General terms only, no medical details needed", "Speech therapy fortnightly, OT through NDIS")}
-      ${q("other", "Anything else the department should know?", "Optional", "")}
+      ${q("other", "Anything else the department should know?", "Optional", "")}`}
     </div>
     <p id="pfMsg" role="alert" style="color:var(--bad)"></p>
     <div class="row"><button class="btn primary" type="submit" id="pfGo">Write it</button><span id="pfWait" hidden><span class="spinner"></span> Writing. This usually takes 1 to 3 minutes. Keep this page open.</span></div>
@@ -877,7 +935,7 @@ async function programView(id){
   view.innerHTML = `<div class="stack">${banner()}
     <p class="small noprint"><a href="#/child/${p.child_id}">← ${esc(c.name)}</a></p>
     <div class="stack" style="gap:6px"><h1>${esc(p.title)}</h1><p class="muted">${esc(g.name || p.state)} · written ${nice(iso(new Date(p.created_at)))}</p></div>
-    <p class="banner noprint">This is a draft. Read it through, fix anything that isn't right, and fill in any [square brackets] before you send it. ${esc(PACK_TIP[p.state] || "")}</p>
+    <p class="banner noprint">This is a draft. Read it through, fix anything that isn't right, and fill in any [square brackets] before you ${IS_PRO() ? "share it with the team" : "send it"}. ${IS_PRO() ? "If your school has its own plan template, paste these sections into it." : esc(PACK_TIP[p.state] || "")}</p>
     ${ct.sections.map((x, i) => `<section class="card stack psec"><h2>${esc(x.heading)}</h2><textarea class="noprint" data-i="${i}" rows="8">${esc(x.body)}</textarea><div class="printonly ptext">${esc(x.body)}</div></section>`).join("")}
     <div class="row noprint"><button class="btn primary" type="button" id="pgSave">Save changes</button><button class="btn" type="button" id="pgCopy">Copy all text</button><button class="btn" type="button" id="pgPrint">Print or save as PDF</button><span id="pgDelArea"><button class="btn danger" type="button" id="pgDel">Delete</button></span></div>
     <p class="small muted noprint">To send it: print to PDF, or copy the text into your state's form. <a href="#/child/${p.child_id}/guide">Back to the ${esc(g.name || "")} guide</a></p>
@@ -954,6 +1012,7 @@ const TOPUPS = [
 // Error message for AI writing, with the right next step
 const aiErr = err => err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>`
   : err.code === "fair_use" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">Buy a top-up</a>` : esc(err.message);
+const PRO_PLAN = { key: "pro", name: "Professional", month: 39.99, year: 379, features: ["Up to 15 students", "Session plans, including group sessions for 2 to 4 students", "Goal plans for support plans and team meetings", "Weekly and year plans, worksheets and progress reports", "Reports written for parents or for your team", "Larger monthly AI allowance", "Privacy-first: initials only, photos only with consent"], soon: [] };
 const PLANS = [
   { key: "family", name: "Family", month: 24.99, year: 229, features: ["Unlimited personalised AI lesson plans", "Weekly plans tailored to each child's interests", "Year plans: 4 terms, each with a theme and goals", "Step-by-step guide to your state's requirements, with deadlines", "Registration pack: your written education program, drafted for you", "Progress reports for your moderator or review, with photos", "Learning time tracked by curriculum area", "Photo and video evidence on every lesson", "Up to 3 children"], soon: ["Download all evidence as one folder", "Share plans with your child's therapists"] }
 ];
@@ -965,15 +1024,15 @@ async function billingView(){
   let period = "year";
   const draw = () => {
     view.innerHTML = `<div class="stack">
-      <p class="small"><a href="#/">← Your family</a></p>
+      <p class="small"><a href="#/">← ${IS_PRO() ? "Your students" : "Your family"}</a></p>
       <h1>Account and billing</h1>
       ${status === "success" ? `<p class="banner">${acc.subscribed ? "Thank you! Your subscription is active." : "Thanks! Your payment went through. It can take a minute to show here; refresh shortly."}</p>` : ""}
       ${status === "cancelled" ? `<p class="banner">Checkout was cancelled. You haven't been charged.</p>` : ""}
       ${status === "topup" ? `<p class="banner">Thank you! Your top-up has been added. If it doesn't show yet, refresh in a minute.</p>` : ""}
       ${acc.comp ? `<div class="card stack"><h2>You have free access</h2><p>Your account is on the free access list, so there's nothing to pay. You get unlimited personalised plans.</p></div>` :
-        acc.subscribed && sub ? `<div class="card stack"><h2>${esc(PLANS.find(p => p.key === sub.plan)?.name || "Subscribed")}</h2><p>Status: <b>${esc(sub.status)}</b>${sub.current_period_end ? ` · renews ${nice(sub.current_period_end.slice(0,10))}` : ""}</p><div><button class="btn primary" type="button" id="portal">Manage subscription</button></div><p class="small muted">Change plan, update your card, download invoices or cancel.</p></div>` :
+        acc.subscribed && sub ? `<div class="card stack"><h2>${esc([...PLANS, PRO_PLAN].find(p => p.key === sub.plan)?.name || "Subscribed")}</h2><p>Status: <b>${esc(sub.status)}</b>${sub.current_period_end ? ` · renews ${nice(sub.current_period_end.slice(0,10))}` : ""}</p><div><button class="btn primary" type="button" id="portal">Manage subscription</button></div><p class="small muted">Change plan, update your card, download invoices or cancel.</p></div>` :
         `<div class="row"><div class="daytabs" role="tablist"><button type="button" data-p="year" aria-pressed="${period === "year"}">Yearly (save about 23%)</button><button type="button" data-p="month" aria-pressed="${period === "month"}">Monthly</button></div></div>
-        <div class="${PLANS.length > 1 ? "grid2" : ""}" style="${PLANS.length > 1 ? "" : "max-width:560px"}">${PLANS.map(p => `<div class="card stack"><h2>${p.name}</h2><p><b style="font-size:28px;font-family:var(--display)">A$${period === "year" ? p.year : p.month}</b> <span class="muted">/ ${period}</span></p>
+        <div style="max-width:560px">${(IS_PRO() ? [PRO_PLAN] : PLANS).map(p => `<div class="card stack"><h2>${p.name}</h2><p><b style="font-size:28px;font-family:var(--display)">A$${period === "year" ? p.year : p.month}</b> <span class="muted">/ ${period}</span></p>
           <ul style="margin:0;padding-left:20px">${p.features.map(f => `<li>${esc(f)}</li>`).join("")}</ul>${p.soon?.length ? `<p class="small muted"><b>Coming soon, included at no extra cost:</b> ${p.soon.map(esc).join("; ")}.</p>` : ""}
           <div><button class="btn primary" type="button" data-plan="${p.key}_${period}">Choose ${p.name}</button></div></div>`).join("")}</div>
         <p class="small muted">Prices in Australian dollars, including GST where applicable. Cancel any time. Payments are handled securely by Stripe.</p>`}
@@ -985,6 +1044,9 @@ async function billingView(){
           <h3 style="margin-top:6px">Need more?</h3>
           <div class="grid2">${TOPUPS.map(t => `<div class="card stack" style="padding:14px"><b>${t.name}: A$${t.price.toFixed(2)}</b><span class="small muted">${t.blurb}</span><div><button class="btn ${out ? "primary" : "quiet"} small" type="button" data-topup="${t.key}">Buy ${t.name.toLowerCase()}</button></div></div>`).join("")}</div>
           <p class="small muted">One-off payment, not a subscription. Top-ups never expire while your account is open.</p></div>`; })() : ""}
+      <div class="card stack" style="margin-top:24px"><h2>Account type</h2><p>${IS_PRO() ? `Professional${user?.user_metadata?.role ? ` · ${esc(user.user_metadata.role)}` : ""}` : "Parent or carer"}</p>
+        <div><button class="btn quiet small" type="button" id="swType">${IS_PRO() ? "Switch to a parent or carer account" : "I'm a teacher, therapist or education professional"}</button></div>
+        <p class="small muted">Switching changes the wording, features and plan you see. Your ${KID(true)} and plans stay. If you have a subscription, change it under Manage subscription.</p></div>
       <div class="card stack" style="margin-top:24px"><h2>Contact us</h2><p>Questions, problems or ideas? Email <a href="mailto:hello@spectrumhomeed.com">hello@spectrumhomeed.com</a> and we'll get back to you, usually within a couple of days.</p></div>
       <div class="card stack" style="margin-top:24px"><h2>Delete my account</h2>
         <p>This permanently deletes your account, every child profile, all plans and records, and every photo and video. ${acc.subscribed ? "Your subscription will be cancelled straight away. " : ""}It can't be undone.</p>
@@ -992,6 +1054,7 @@ async function billingView(){
         <div id="delArea"><button class="btn danger" type="button" id="delStart">Delete my account</button></div>
       </div>
     </div>`;
+    if ($("swType")) $("swType").onclick = async () => { try { user = await db.setAccount({ account_type: IS_PRO() ? "family" : "pro" }); toast("Account type changed"); location.hash = "#/"; } catch(e){ toast(e.message); } };
     const bindDel = () => { $("delStart").onclick = () => {
       $("delArea").innerHTML = `<div class="stack"><label class="f">To confirm, type your email address <input type="email" id="delEmail" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
         <p id="delMsg" role="alert" style="color:var(--bad)"></p>
@@ -1082,7 +1145,7 @@ async function adminView(){
     </div>
 
     <div class="stack"><h2>Paying customers</h2>
-      <div class="card stack">${tbl(["Email", "Plan", "Status", "Location", "Renews"], (d.customers || []).map(c => [esc(c.email || "—"), esc(c.plan === "plus" ? "Family Plus" : c.plan === "family" ? "Family" : (c.plan || "—")), esc(c.status), esc([c.city, c.state, c.country].filter(Boolean).join(", ") || "—"), c.current_period_end ? nice(c.current_period_end.slice(0, 10)) : "—"]))}</div>
+      <div class="card stack">${tbl(["Email", "Plan", "Status", "Location", "Renews"], (d.customers || []).map(c => [esc(c.email || "—"), esc(c.plan === "plus" ? "Family Plus" : c.plan === "family" ? "Family" : c.plan === "pro" ? "Professional" : (c.plan || "—")), esc(c.status), esc([c.city, c.state, c.country].filter(Boolean).join(", ") || "—"), c.current_period_end ? nice(c.current_period_end.slice(0, 10)) : "—"]))}</div>
       <div class="card stack"><h3>Revenue by location</h3>${tbl(["State", "Country", "Customers", "Revenue"], (rev.by_place || []).map(p => [esc(p.state || "—"), esc(p.country), p.customers, money(p.cents)]))}</div>
     </div>
 
