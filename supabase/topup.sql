@@ -42,3 +42,9 @@ create or replace function public.my_ai_usage() returns json
 language sql stable security definer set search_path = public as $$ select public.ai_allowance(auth.uid()); $$;
 revoke all on function public.my_ai_usage() from public, anon;
 grant execute on function public.my_ai_usage() to authenticated;
+
+-- Top-up packs (Stripe sandbox prices; switch to live price ids when going live)
+insert into public.app_settings (key, value) values ('topup_packs', '{
+  "small": { "price": "price_1UVWXyAdFZYaakceji6T9JNr", "credit_aud": 2.00, "price_aud": 4.99 },
+  "large": { "price": "price_1UVWYfAdFZYaakceAGmGeTcW", "credit_aud": 4.50, "price_aud": 9.99 }
+}') on conflict (key) do update set value = excluded.value, updated_at = now();
