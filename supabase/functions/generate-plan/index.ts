@@ -202,10 +202,28 @@ Deno.serve(async (req) => {
     return json({ error: "Your free starter plan has been used. Subscribe for unlimited personalised plans, or create a free template plan.", code: "upgrade" }, 402);
   }
 
-  const limit = Number(Deno.env.get("DAILY_PLAN_LIMIT") ?? "10");
+  // Daily limits per kind of AI run
+  const KIND = isProgram ? "program" : isYear ? "year" : isReport ? "report" : isSheet ? "worksheet" : "plan";
+  const DAILY: Record<string, number> = { plan: Number(Deno.env.get("DAILY_PLAN_LIMIT") ?? "10"), worksheet: Number(Deno.env.get("DAILY_WORKSHEET_LIMIT") ?? "30"), program: 10, year: 10, report: 10 };
+  const NOUN: Record<string, string> = { plan: "weekly plans", worksheet: "worksheets", program: "registration packs", year: "year plans", report: "report summaries" };
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-  const { count } = await admin.from("generations").select("id", { count: "exact", head: true }).eq("parent_id", user.id).gte("created_at", since);
-  if ((count ?? 0) >= limit) return json({ error: `You've generated ${limit} plans in the last 24 hours. Try again tomorrow.` }, 429);
+  const { count } = await admin.from("generations").select("id", { count: "exact", head: true }).eq("parent_id", user.id).eq("kind", KIND).gte("created_at", since);
+  if ((count ?? 0) >= DAILY[KIND]) return json({ error: `You've made ${DAILY[KIND]} ${NOUN[KIND]} in the last 24 hours. You can make more tomorrow.`, code: "daily" }, 429);
+
+  // Monthly fair-use budget (real AI cost, Perth calendar month). Admins are exempt.
+  const { data: settingRows } = await admin.from("app_settings").select("key,value");
+  const SET: Record<string, any> = Object.fromEntries((settingRows ?? []).map((r: any) => [r.key, r.value]));
+  const audPerUsd = Number(SET.aud_per_usd ?? 1.55), budgetAud = Number(SET.ai_budget_aud ?? 9);
+  if (!access?.is_admin) {
+    const nowPerth = new Date(Date.now() + 8 * 3600 * 1000);
+    const monthStart = new Date(Date.UTC(nowPerth.getUTCFullYear(), nowPerth.getUTCMonth(), 1) - 8 * 3600 * 1000).toISOString();
+    const { data: used } = await admin.from("ai_usage").select("cost_usd").eq("parent_id", user.id).gte("created_at", monthStart);
+    const spentAud = (used ?? []).reduce((t: number, r: any) => t + Number(r.cost_usd), 0) * audPerUsd;
+    if (spentAud >= budgetAud) {
+      const reset = new Date(Date.UTC(nowPerth.getUTCFullYear(), nowPerth.getUTCMonth() + 1, 1)).toLocaleDateString("en-AU", { day: "numeric", month: "long" });
+      return json({ error: `You've reached this month's fair-use limit for AI writing. It resets on ${reset}. Your plans, records, worksheets and reports all still work.`, code: "fair_use" }, 429);
+    }
+  }
 
   const fw = FRAMEWORKS[child.state] ?? FRAMEWORKS.WA;
   const age = ageFrom(child.birth_year);
@@ -269,8 +287,16 @@ ${termNote}`;
   const overviewSchema = { type: "object", properties: { title: str, summary: { ...str, description: "Two sentences" }, focus_goals: { type: "array", items: str, minItems: 3, maxItems: 5 } }, required: ["title", "summary", "focus_goals"] };
 
   const model = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5-5";
+  // Real cost of this run, from the token counts the API reports (US$ per million tokens: input, output)
+  const PRICE: Record<string, [number, number]> = { "claude-sonnet-5-5": [2, 10], "claude-haiku-5-5": [0.10, 0.50] };
+  const spent = { input: 0, output: 0, usd: 0, models: new Set<string>() };
+  const recordUsage = async () => {
+    if (!spent.input && !spent.output) return;
+    const { error } = await admin.from("ai_usage").insert({ parent_id: user!.id, child_id, kind: KIND, model: [...spent.models].join(","), input_tokens: spent.input, output_tokens: spent.output, cost_usd: Math.round(spent.usd * 1e5) / 1e5 });
+    if (error) console.error("Usage record failed", error);
+  };
   // Calls the model and checks the result. Tries the tool twice, then once more asking for plain JSON text with extra room.
-  async function callTool(prompt: string, name: string, schema: unknown, maxTokens: number, ok: (v: any) => boolean = () => true) {
+  async function callTool(prompt: string, name: string, schema: unknown, maxTokens: number, ok: (v: any) => boolean = () => true, useModel: string = model) {
     let lastGood: any = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       const plain = attempt === 1;
@@ -279,7 +305,7 @@ ${termNote}`;
         method: "POST", signal: AbortSignal.timeout(150_000),
         headers: { "x-api-key": apiKey!, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({
-          model, max_tokens: maxTokens, system,
+          model: useModel, max_tokens: maxTokens, system,
           ...(plain ? {} : {
             tools: [{ name, description: "Save the result. Always call this tool exactly once with the complete result.", input_schema: schema }],
             tool_choice: { type: "auto" },
@@ -291,6 +317,8 @@ ${termNote}`;
       }); } catch (e) { console.error(`${name} request timed out or failed (attempt ${attempt + 1})`, String(e)); continue; }
       if (!resp.ok) { console.error("Anthropic error", resp.status, (await resp.text()).slice(0, 500)); continue; }
       const out = await resp.json();
+      { const u = out.usage ?? {}, pr = PRICE[useModel] ?? [2, 10], i = Number(u.input_tokens) || 0, o = Number(u.output_tokens) || 0;
+        spent.input += i; spent.output += o; spent.usd += (i * pr[0] + o * pr[1]) / 1e6; spent.models.add(useModel); }
       const use = (out.content ?? []).find((c: any) => c.type === "tool_use");
       let result: any = use?.input ?? null;
       if (!result) {
@@ -309,6 +337,8 @@ ${termNote}`;
   // ---------- Worksheet: printable practice for any subject, level and topic ----------
   if (isSheet) {
     const subj = String(ws.subject).slice(0, 80), lvl = String(ws.level || child.levels?.[ws.subject] || "").slice(0, 60), topic = String(ws.topic).slice(0, 200);
+    // Worksheet model: the admin setting, or (for admins comparing) the model they picked
+    const sheetModel = (access?.is_admin && PRICE[ws.model]) ? ws.model : (PRICE[SET.worksheet_model] ? SET.worksheet_model : model);
     const n = Math.max(3, Math.min(20, Number(ws.count) || (child.support_level === "high" ? 4 : child.support_level === "moderate" ? 6 : 10)));
     const sPrompt = `${profile}
 
@@ -334,22 +364,22 @@ Rules:
     const t = (v: unknown, m: number) => String(v ?? "").slice(0, m);
     const work = async () => {
       try {
-        const out = obj(await callTool(sPrompt, "save_worksheet", sSchema, 8000, (d) => arr(d?.sections).some((x: any) => arr(obj(x)?.items).length)));
+        const out = obj(await callTool(sPrompt, "save_worksheet", sSchema, 8000, (d) => arr(d?.sections).some((x: any) => arr(obj(x)?.items).length), sheetModel));
         const sections = arr(out.sections).map(obj).slice(0, 4).map((x: any) => ({ heading: t(x.heading, 120), items: arr(x.items).map(obj).slice(0, 25).map((it: any) => ({
           type: ["choice", "write", "count", "match", "draw", "fill"].includes(it.type) ? it.type : "write", prompt: t(it.prompt, 500),
           options: arr(it.options).map((o: unknown) => t(o, 120)).slice(0, 5), visual: t(it.visual, 200),
           pairs: arr(it.pairs).map(obj).map((pp: any) => ({ left: t(pp.left, 120), right: t(pp.right, 120) })).slice(0, 8), answer: t(it.answer, 400),
         })).filter((it: any) => it.prompt) })).filter((x: any) => x.items.length);
         if (!sections.length) { await setJob({ status: "failed", error: "The worksheet came back empty. Please try again." }); return; }
-        await admin.from("generations").insert({ parent_id: user!.id });
-        const content = { title: t(out.title, 120) || topic, intro: t(out.intro, 400), teach: t(out.teach, 1500), key_words: arr(out.key_words).map((w: unknown) => t(w, 40)).slice(0, 6), sections };
+        await admin.from("generations").insert({ parent_id: user!.id, kind: KIND });
+        const content = { model: sheetModel, title: t(out.title, 120) || topic, intro: t(out.intro, 400), teach: t(out.teach, 1500), key_words: arr(out.key_words).map((w: unknown) => t(w, 40)).slice(0, 6), sections };
         const { data: saved, error } = await admin.from("worksheets").insert({ parent_id: user!.id, child_id, plan_id: ws.plan_id || null, lesson_key: ws.lesson_key || null, subject: subj, level: lvl || null, topic, content }).select("id").single();
         if (error || !saved) { console.error("Worksheet save failed", error); await setJob({ status: "failed", error: "Couldn't save the worksheet. Please try again." }); return; }
         await setJob({ status: "done", worksheet_id: saved.id, progress: 5 });
       } catch (e) { console.error("Worksheet failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
     };
     // @ts-ignore EdgeRuntime is provided by Supabase
-    EdgeRuntime.waitUntil(work());
+    EdgeRuntime.waitUntil(work().finally(recordUsage));
     return json({ job_id: job.id }, 202);
   }
 
@@ -379,14 +409,14 @@ Write as the parent, first person, plain Australian English, respectful and neur
         const out = obj(await callTool(rPrompt, "save_report", rSchema, 8000, (d) => arr(d?.sections).length >= 3));
         const sections = arr(out.sections).map(obj).map((x: any) => ({ heading: String(x.heading ?? "").slice(0, 120), body: String(x.body ?? "").slice(0, 8000) })).filter((x: any) => x.heading && x.body);
         if (!sections.length) { await setJob({ status: "failed", error: "The report came back empty. Please try again." }); return; }
-        await admin.from("generations").insert({ parent_id: user!.id });
+        await admin.from("generations").insert({ parent_id: user!.id, kind: KIND });
         const { data: saved, error } = await admin.from("reports").insert({ parent_id: user!.id, child_id, period_start: from, period_end: to, content: { sections } }).select("id").single();
         if (error || !saved) { console.error("Report save failed", error); await setJob({ status: "failed", error: "Couldn't save the report. Please try again." }); return; }
         await setJob({ status: "done", report_id: saved.id, progress: 5 });
       } catch (e) { console.error("Report failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
     };
     // @ts-ignore EdgeRuntime is provided by Supabase
-    EdgeRuntime.waitUntil(work());
+    EdgeRuntime.waitUntil(work().finally(recordUsage));
     return json({ job_id: job.id }, 202);
   }
 
@@ -419,7 +449,7 @@ Also give the year a short title and a two-sentence summary for the parent. Keep
           activities: arr(t.activities).map((g: unknown) => String(g).slice(0, 200)).filter(Boolean).slice(0, 8),
         }));
         if (terms.length < 4) { await setJob({ status: "failed", error: "The year plan came back incomplete. Please try again." }); return; }
-        await admin.from("generations").insert({ parent_id: user!.id });
+        await admin.from("generations").insert({ parent_id: user!.id, kind: KIND });
         const content = { title: String(out.title ?? `${child.name}'s ${year}`).slice(0, 120), summary: String(out.summary ?? "").slice(0, 600), terms, areas: fw.areas };
         const { data: saved, error } = await admin.from("year_plans").upsert({ parent_id: user!.id, child_id, year: Number(year), content, updated_at: new Date().toISOString() }, { onConflict: "child_id,year" }).select("id").single();
         if (error || !saved) { console.error("Year save failed", error); await setJob({ status: "failed", error: "Couldn't save the year plan. Please try again." }); return; }
@@ -427,7 +457,7 @@ Also give the year a short title and a two-sentence summary for the parent. Keep
       } catch (e) { console.error("Year failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
     };
     // @ts-ignore EdgeRuntime is provided by Supabase
-    EdgeRuntime.waitUntil(work());
+    EdgeRuntime.waitUntil(work().finally(recordUsage));
     return json({ job_id: job.id }, 202);
   }
 
@@ -470,14 +500,14 @@ Rules:
         const out = obj(await callTool(progPrompt, "save_program", progSchema, 12000, (d) => arr(d?.sections).length >= 3));
         const sections = arr(out.sections).map(obj).map((x: any) => ({ heading: String(x.heading ?? "").slice(0, 120), body: String(x.body ?? "").slice(0, 6000) })).filter((x: any) => x.heading && x.body);
         if (!sections.length) { await setJob({ status: "failed", error: "The program came back empty. Please try again." }); return; }
-        await admin.from("generations").insert({ parent_id: user!.id });
+        await admin.from("generations").insert({ parent_id: user!.id, kind: KIND });
         const { data: saved, error } = await admin.from("programs").insert({ parent_id: user!.id, child_id, state: child.state, title: `${child.name}'s ${spec.doc}`, content: { doc_name: spec.doc, sections, answers } }).select("id").single();
         if (error || !saved) { console.error("Program save failed", error); await setJob({ status: "failed", error: "Couldn't save the program. Please try again." }); return; }
         await setJob({ status: "done", program_id: saved.id, progress: 5 });
       } catch (e) { console.error("Program failed", e); await setJob({ status: "failed", error: "The writer had a problem. Please try again in a minute." }); }
     };
     // @ts-ignore EdgeRuntime is provided by Supabase
-    EdgeRuntime.waitUntil(work());
+    EdgeRuntime.waitUntil(work().finally(recordUsage));
     return json({ job_id: job.id }, 202);
   }
 
@@ -518,7 +548,7 @@ Give this week's plan (starting ${week_start}) a short title, a two-sentence sum
         await setJob({ status: "failed", error: "The plan came back empty. Please try again." });
         return;
       }
-      await admin.from("generations").insert({ parent_id: user!.id });
+      await admin.from("generations").insert({ parent_id: user!.id, kind: KIND });
       const { data: saved, error: saveErr } = await admin.from("plans").insert({
         parent_id: user!.id, child_id, week_start, title: plan.title, content: { ...plan, framework: fw.name, areas: fw.areas, targets, daily_minutes: minutes }, source: "ai",
       }).select("id").single();
@@ -530,6 +560,6 @@ Give this week's plan (starting ${week_start}) a short title, a two-sentence sum
     }
   }
   // @ts-ignore EdgeRuntime is provided by Supabase
-  EdgeRuntime.waitUntil(work());
+  EdgeRuntime.waitUntil(work().finally(recordUsage));
   return json({ job_id: job.id }, 202);
 });

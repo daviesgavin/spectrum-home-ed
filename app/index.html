@@ -85,6 +85,8 @@ textarea{min-height:72px;resize:vertical}
 .hpi{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ev{display:flex;gap:8px;flex-wrap:wrap;align-items:stretch}
 .reqcard{text-decoration:none;color:inherit}
+.cmp{display:grid;grid-template-columns:1fr;gap:18px}
+@media (min-width:900px){.cmp{grid-template-columns:1fr 1fr}}
 .teach{background:var(--bg);border-left:4px solid var(--accent);border-radius:10px;padding:10px 12px}
 .teach p{margin:4px 0 0}
 .sheet{background:#fff;color:#111;border:1px solid var(--line);border-radius:16px;padding:22px;font-size:19px;line-height:1.5}
@@ -299,6 +301,8 @@ if (LIVE) {
     async worksheets(childId){ return must(await sb.from("worksheets").select("id,subject,level,topic,created_at,content->>title").eq("child_id", childId).order("created_at", { ascending:false }).limit(100)); },
     async worksheet(id){ return must(await sb.from("worksheets").select("*").eq("id", id).single()); },
     async deleteWorksheet(id){ must(await sb.from("worksheets").delete().eq("id", id)); },
+    async aiCosts(){ return must(await sb.rpc("admin_ai_costs")); },
+    async setSetting(key, value){ must(await sb.from("app_settings").upsert({ key, value, updated_at: new Date().toISOString() })); },
     async programs(childId){ return must(await sb.from("programs").select("id,title,state,created_at,updated_at").eq("child_id", childId).order("created_at", { ascending:false })); },
     async program(id){ return must(await sb.from("programs").select("*").eq("id", id).single()); },
     async saveProgram(id, content){ return must(await sb.from("programs").update({ content, updated_at: new Date().toISOString() }).eq("id", id).select().single()); },
@@ -640,7 +644,7 @@ const TOPIC_IDEAS = [
 ];
 const topicIdeas = subj => (TOPIC_IDEAS.find(([re]) => re.test(subj)) || [null, []])[1];
 async function worksheetsView(childId){
-  const c = await db.child(childId); const fw = FW[c.state] || FW.WA; const list = await db.worksheets(childId);
+  const c = await db.child(childId); const fw = FW[c.state] || FW.WA; const [list, acc] = await Promise.all([db.worksheets(childId), db.access()]);
   view.innerHTML = `<div class="stack">${banner()}
     <p class="small"><a href="#/child/${childId}">← ${esc(c.name)}</a></p>
     <h1>Worksheets for ${esc(c.name)}</h1>
@@ -651,7 +655,7 @@ async function worksheetsView(childId){
       <div class="chips" id="wIdeas"></div>
       <label class="f">How many questions? <select id="wCount"><option value="">Suggested for ${esc(c.name)}</option>${[3,4,5,6,8,10,12,15,20].map(n => `<option>${n}</option>`).join("")}</select></label>
       <p id="wMsg" role="alert" style="color:var(--bad)"></p>
-      <div class="row"><button class="btn primary" type="submit" id="wGo">Make the worksheet</button><span id="wWait" hidden><span class="spinner"></span> Making it. About a minute.</span></div>
+      <div class="row"><button class="btn primary" type="submit" id="wGo">Make the worksheet</button>${acc.is_admin ? `<button class="btn" type="button" id="wCmp">Compare models</button>` : ""}<span id="wWait" hidden><span class="spinner"></span> Making it. About a minute.</span></div>
     </form>
     <div class="stack"><h2>Made so far</h2>${list.length ? `<div class="plans">${list.map(w => `<a class="planrow" href="#/worksheet/${w.id}"><span><b>${esc(w.title || w.topic)}</b><br><span class="muted small">${esc(w.subject)}${w.level ? ` · ${esc(w.level)}` : ""} · ${nice(iso(new Date(w.created_at)))}</span></span><span aria-hidden="true">→</span></a>`).join("")}</div>` : `<p class="muted">None yet. You can also make one from any lesson in a weekly plan.</p>`}</div>
   </div>`;
@@ -659,6 +663,11 @@ async function worksheetsView(childId){
   const syncLvl = () => { const l = (c.levels || {})[$("wSubj").value]; $("wLvl").options[0].textContent = l ? `${c.name}'s level (${l})` : `Match ${c.name}'s age and support level`; };
   drawIdeas(); syncLvl(); $("wSubj").onchange = () => { drawIdeas(); syncLvl(); };
   $("wIdeas").onclick = e => { const b = e.target.closest("[data-idea]"); if (b) $("wTopic").value = b.dataset.idea; };
+  if ($("wCmp")) $("wCmp").onclick = async () => { const topic = $("wTopic").value.trim(); if (!topic) { $("wMsg").textContent = "Type a topic, or tap one of the ideas."; return; }
+    $("wCmp").disabled = $("wGo").disabled = true; $("wWait").hidden = false; $("wMsg").textContent = "";
+    const base = { subject: $("wSubj").value, level: $("wLvl").value, topic, count: +$("wCount").value || null };
+    try { const [a, b] = await Promise.all([db.writeWorksheet(c, { ...base, model: "claude-sonnet-5-5" }), db.writeWorksheet(c, { ...base, model: "claude-haiku-5-5" })]); location.hash = `#/compare/${a.id}/${b.id}`; }
+    catch(err){ $("wCmp").disabled = $("wGo").disabled = false; $("wWait").hidden = true; $("wMsg").textContent = err.message; } };
   $("wf").onsubmit = async e => { e.preventDefault(); const topic = $("wTopic").value.trim(); if (!topic) { $("wMsg").textContent = "Type a topic, or tap one of the ideas."; return; }
     $("wGo").disabled = true; $("wWait").hidden = false; $("wMsg").textContent = "";
     try { const w = await db.writeWorksheet(c, { subject: $("wSubj").value, level: $("wLvl").value, topic, count: +$("wCount").value || null }); location.hash = `#/worksheet/${w.id}`; }
@@ -675,6 +684,22 @@ function wsItemHTML(it, n){
     write: () => `${it.visual ? `<div class="wvis">${esc(it.visual)}</div>` : ""}${lines(2)}`
   }[it.type] || (() => lines(2));
   return `<li class="witem"><p class="wq"><b>${n}.</b> ${esc(it.prompt).replace(/_{2,}/g, '<span class="wblank"></span>')}</p>${body()}</li>`;
+}
+function sheetHTML(w){ const ct = w.content || { sections: [] }; let n = 0;
+  return `<article class="sheet"><h1>${esc(ct.title || w.topic)}</h1><p class="muted small">${esc(w.subject)}${w.level ? ` · ${esc(w.level)}` : ""}</p>${ct.intro ? `<p>${esc(ct.intro)}</p>` : ""}
+    ${ct.teach ? `<div class="teach"><b>Let's learn</b><p>${esc(ct.teach)}</p></div>` : ""}${ct.sections.map(s => `<section class="wsec"><h2>${esc(s.heading)}</h2><ol class="witems">${s.items.map(it => wsItemHTML(it, ++n)).join("")}</ol></section>`).join("")}</article>`; }
+async function compareView(a, b){
+  const [wa, wb] = await Promise.all([db.worksheet(a), db.worksheet(b)]);
+  const label = w => String(w.content?.model || "").includes("haiku") ? "Haiku 5.5 (about 20 times cheaper)" : "Sonnet 5.5 (current quality)";
+  view.innerHTML = `<div class="stack">${banner()}
+    <p class="small"><a href="#/child/${wa.child_id}/worksheets">← Worksheets</a></p>
+    <h1>Compare worksheet models</h1>
+    <p class="muted">Same subject, level and topic, written by each model. If the cheaper one is just as good, switch all worksheets to it.</p>
+    <div class="row"><button class="btn primary" type="button" id="useHaiku">Use Haiku for all worksheets</button><button class="btn" type="button" id="useSonnet">Keep Sonnet</button></div>
+    <div class="cmp">${[wa, wb].map(w => `<div class="stack"><h2>${esc(label(w))}</h2>${sheetHTML(w)}<p><a href="#/worksheet/${w.id}">Open this one</a></p></div>`).join("")}</div>
+  </div>`;
+  $("useHaiku").onclick = async () => { try { await db.setSetting("worksheet_model", "claude-haiku-5-5"); toast("Worksheets now use Haiku 5.5"); } catch(e){ toast(e.message); } };
+  $("useSonnet").onclick = async () => { try { await db.setSetting("worksheet_model", "claude-sonnet-5-5"); toast("Worksheets stay on Sonnet 5.5"); } catch(e){ toast(e.message); } };
 }
 async function worksheetView(id){
   const w = await db.worksheet(id); const c = await db.child(w.child_id).catch(() => ({ name: "" })); const ct = w.content || { sections: [] };
@@ -928,6 +953,7 @@ const PLANS = [
 async function billingView(){
   const status = (location.hash.split("?")[1] || "").match(/status=(\w+)/)?.[1];
   let [acc, sub] = await Promise.all([db.access(), db.subscription()]);
+  let use = null; try { const q = await db.sb.rpc("my_ai_usage"); use = q.error ? null : q.data; } catch(e){}
   if (status === "success" && !acc.subscribed) { for (let i = 0; i < 5 && !acc.subscribed; i++) { await new Promise(r => setTimeout(r, 1500)); acc = await db.access(); } sub = await db.subscription(); }
   let period = "year";
   const draw = () => {
@@ -944,6 +970,8 @@ async function billingView(){
           <div><button class="btn primary" type="button" data-plan="${p.key}_${period}">Choose ${p.name}</button></div></div>`).join("")}</div>
         <p class="small muted">Prices in Australian dollars, including GST where applicable. Cancel any time. Payments are handled securely by Stripe.</p>`}
       <p id="bMsg" role="alert" style="color:var(--bad)"></p>
+      ${use && (acc.comp || acc.subscribed) && !acc.is_admin ? (() => { const pct = Math.min(100, Math.round(Number(use.spent_usd) * Number(use.aud_per_usd) / Number(use.budget_aud) * 100));
+        return `<div class="card stack"><div class="row" style="justify-content:space-between"><h3>AI writing this month</h3><span class="small muted">${pct}% of your fair-use allowance</span></div><div class="progress"><i style="width:${pct}%"></i></div><p class="small muted">Plans, worksheets, packs and reports all use a little of the allowance. Most families use well under half. It resets on ${nice(String(use.resets).slice(0,10))}.</p></div>`; })() : ""}
       <div class="card stack" style="margin-top:24px"><h2>Delete my account</h2>
         <p>This permanently deletes your account, every child profile, all plans and records, and every photo and video. ${acc.subscribed ? "Your subscription will be cancelled straight away. " : ""}It can't be undone.</p>
         <p class="small muted">Payment records are kept for tax purposes, as our <a href="../privacy.html#keep" target="_blank" rel="noopener">Privacy Policy</a> explains. If you want to keep anything, print your plans first.</p>
@@ -993,6 +1021,7 @@ async function adminView(){
   if (r.error) throw new Error(r.error.message);
   const d = r.data, v = d.visits, g = d.registrations, rev = d.revenue;
   let admins = []; try { admins = await db.adminList(); } catch(e){ admins = null; }
+  let ai = null; try { ai = await db.aiCosts(); } catch(e){}
   let st = null; try { const q = await db.sb.rpc("admin_storage"); st = q.error ? null : q.data; } catch(e){}
   const gb = b => b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : (b / 1e6).toFixed(1) + " MB";
   const me = (user?.email || "").toLowerCase(), OWNER = "daviesgavin@hotmail.com";
@@ -1005,6 +1034,18 @@ async function adminView(){
       <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${kpi("Last 7 days", money(rev.week))}${kpi("Last 30 days", money(rev.month))}${kpi("Last 12 months", money(rev.year))}${kpi("Paying families", d.paying)}</div>
       <div class="card stack"><h3>Revenue by month</h3>${bars((rev.by_month || []).map(m => ({ label: m.month.slice(5) + "/" + m.month.slice(2, 4), value: m.cents })), money)}</div>
     </div>
+
+    ${ai ? (() => { const rate = Number(ai.settings?.aud_per_usd ?? 1.55), aud = u => "A$" + (Number(u) * rate).toFixed(2), audc = u => "A$" + (Number(u) * rate).toFixed(3);
+      return `<div class="stack"><h2>AI costs</h2><p class="small muted">Real cost from the token counts of every AI run, converted at A$${rate} per US$1. Your own runs count here too.</p>
+      <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${kpi("This month", aud(ai.month_usd), `${ai.month_runs} AI runs`)}${kpi("Families using AI", ai.families)}${kpi("Average per family", ai.families ? aud(ai.month_usd / ai.families) : "A$0.00", "this month")}${kpi("Fair-use budget", "A$" + Number(ai.settings?.ai_budget_aud ?? 9).toFixed(2), "per family per month")}</div>
+      <div class="card stack"><h3>Cost per run, last 30 days</h3>${tbl(["Kind", "Model", "Runs", "Average cost"], (ai.by_model || []).map(m => [esc(m.kind), esc(String(m.model || "").replace("claude-", "").replace(/-5-5/, " 5.5")), m.runs, audc(m.avg_usd)]))}</div>
+      <div class="card stack"><h3>Top families this month</h3>${tbl(["Email", "Runs", "Cost"], (ai.top || []).map(t => [esc(t.email), t.runs, aud(t.usd)]))}</div>
+      <form class="card stack" id="aiSet"><h3>Settings</h3>
+        <div class="grid2"><label class="f">Worksheet model <select id="sModel"><option value="claude-sonnet-5-5" ${ai.settings?.worksheet_model === "claude-sonnet-5-5" ? "selected" : ""}>Sonnet 5.5 (best quality)</option><option value="claude-haiku-5-5" ${ai.settings?.worksheet_model === "claude-haiku-5-5" ? "selected" : ""}>Haiku 5.5 (about 20 times cheaper)</option></select></label>
+        <label class="f">Monthly fair-use budget per family (A$) <input type="number" id="sBudget" min="1" max="100" step="0.5" value="${esc(ai.settings?.ai_budget_aud ?? 9)}"></label></div>
+        <label class="f">A$ per US$1 <small>Update now and then to match the exchange rate</small><input type="number" id="sRate" min="0.5" max="3" step="0.01" value="${esc(rate)}"></label>
+        <p class="small muted">Use <b>Compare models</b> on any child's Worksheets page to see the same worksheet from both models before you switch.</p>
+        <div><button class="btn primary" type="submit">Save settings</button></div></form></div>`; })() : ""}
 
     <div class="stack"><h2>Visits</h2><p class="small muted">Location is estimated from each visitor's time zone. No IP addresses are stored.</p>
       <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${kpi("Today", v.today)}${kpi("Last 7 days", v.week)}${kpi("Last 30 days", v.month, `${v.unique_month} unique visitors`)}${kpi("Last 12 months", v.year)}</div>
@@ -1059,6 +1100,9 @@ async function adminView(){
     no.onclick = () => adminView();
     yes.onclick = async () => { try { await db.adminRemove(em); toast("Admin removed"); } catch(err){ toast(err.message); } adminView(); }; });
   $("refresh").onclick = adminView;
+  if ($("aiSet")) $("aiSet").onsubmit = async e => { e.preventDefault();
+    try { await db.setSetting("worksheet_model", $("sModel").value); await db.setSetting("ai_budget_aud", Math.max(1, +$("sBudget").value || 9)); await db.setSetting("aud_per_usd", Math.max(0.5, +$("sRate").value || 1.55)); toast("Settings saved"); adminView(); }
+    catch(err){ toast(err.message); } };
   $("noTrack").onchange = e => { try { e.target.checked ? localStorage.setItem("she-no-track", "1") : localStorage.removeItem("she-no-track"); } catch(err){} toast(e.target.checked ? "Your visits on this device won't be counted" : "Your visits will be counted"); };
   $("compForm").onsubmit = async e => { e.preventDefault(); const em = $("compEmail").value.trim();
     if (!/^\S+@\S+\.\S+$/.test(em)) { $("compMsg").textContent = "Enter a valid email address."; return; }
@@ -1089,6 +1133,7 @@ async function route(){
   if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/report$/))) return guard(() => reportView(m[1]));
   if (LIVE && (m = h.match(/^\/child\/([\w-]+)\/worksheets$/))) return guard(() => worksheetsView(m[1]));
   if (LIVE && (m = h.match(/^\/worksheet\/([\w-]+)$/))) return guard(() => worksheetView(m[1]));
+  if (LIVE && (m = h.match(/^\/compare\/([\w-]+)\/([\w-]+)$/))) return guard(() => compareView(m[1], m[2]));
   if ((m = h.match(/^\/child\/([\w-]+)$/))) return guard(() => childView(m[1]));
   if ((m = h.match(/^\/plan\/([\w-]+)$/))) return guard(() => planView(m[1]));
   return guard(homeView);
