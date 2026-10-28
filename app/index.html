@@ -1044,7 +1044,7 @@ async function adminView(){
     <p class="small"><a href="#/">← Your family</a></p>
     <div class="row" style="justify-content:space-between"><h1>Admin dashboard</h1><button class="btn quiet small" type="button" id="refresh">Refresh</button></div>
 
-    <div class="stack"><h2>Money</h2><p class="small muted">Paid invoices from Stripe. Currently test mode.</p>
+    <div class="stack"><h2>Money</h2><p class="small muted">Paid invoices and top-ups from Stripe (live).</p>
       <div class="kids" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${kpi("Last 7 days", money(rev.week))}${kpi("Last 30 days", money(rev.month))}${kpi("Last 12 months", money(rev.year))}${kpi("Paying families", d.paying)}</div>
       <div class="card stack"><h3>Revenue by month</h3>${bars((rev.by_month || []).map(m => ({ label: m.month.slice(5) + "/" + m.month.slice(2, 4), value: m.cents })), money)}</div>
     </div>
