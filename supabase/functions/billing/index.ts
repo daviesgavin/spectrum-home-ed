@@ -72,6 +72,27 @@ Deno.serve(async (req) => {
       return json({ deleted: true });
     }
 
+    // One-off top-up of AI writing allowance
+    if (body.action === "topup") {
+      const { data: setRow } = await admin.from("app_settings").select("value").eq("key", "topup_packs").maybeSingle();
+      const pack = (setRow?.value ?? {})[body.pack];
+      if (!pack?.price || !(Number(pack.credit_aud) > 0)) return json({ error: "That top-up isn't available right now." }, 400);
+      const active = sub && ["active", "trialing", "past_due"].includes(sub.status);
+      const { data: acc } = await userClient.rpc("my_access");
+      if (!active && !acc?.comp && !acc?.is_admin) return json({ error: "Top-ups are for subscribers. Choose a plan first." }, 403);
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: [{ price: pack.price, quantity: 1 }],
+        ...(sub?.stripe_customer_id ? { customer: sub.stripe_customer_id } : { customer_email: user.email, customer_creation: "always" }),
+        client_reference_id: user.id,
+        metadata: { user_id: user.id, kind: "topup", pack: String(body.pack), credit_aud: String(pack.credit_aud) },
+        billing_address_collection: "required",
+        success_url: `${APP_URL}#/billing?status=topup`,
+        cancel_url: `${APP_URL}#/billing?status=cancelled`,
+      });
+      return json({ url: session.url });
+    }
+
     if (body.action === "portal") {
       if (!sub?.stripe_customer_id) return json({ error: "No subscription found for this account." }, 404);
       const portal = await stripe.billingPortal.sessions.create({ customer: sub.stripe_customer_id, return_url: `${APP_URL}#/billing` });

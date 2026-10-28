@@ -215,13 +215,11 @@ Deno.serve(async (req) => {
   const SET: Record<string, any> = Object.fromEntries((settingRows ?? []).map((r: any) => [r.key, r.value]));
   const audPerUsd = Number(SET.aud_per_usd ?? 1.55), budgetAud = Number(SET.ai_budget_aud ?? 9);
   if (!access?.is_admin) {
-    const nowPerth = new Date(Date.now() + 8 * 3600 * 1000);
-    const monthStart = new Date(Date.UTC(nowPerth.getUTCFullYear(), nowPerth.getUTCMonth(), 1) - 8 * 3600 * 1000).toISOString();
-    const { data: used } = await admin.from("ai_usage").select("cost_usd").eq("parent_id", user.id).gte("created_at", monthStart);
-    const spentAud = (used ?? []).reduce((t: number, r: any) => t + Number(r.cost_usd), 0) * audPerUsd;
-    if (spentAud >= budgetAud) {
-      const reset = new Date(Date.UTC(nowPerth.getUTCFullYear(), nowPerth.getUTCMonth() + 1, 1)).toLocaleDateString("en-AU", { day: "numeric", month: "long" });
-      return json({ error: `You've reached this month's fair-use limit for AI writing. It resets on ${reset}. Your plans, records, worksheets and reports all still work.`, code: "fair_use" }, 429);
+    const { data: al, error: alErr } = await admin.rpc("ai_allowance", { uid: user.id });
+    if (alErr) console.error("Allowance check failed", alErr);
+    if (al && Number(al.available_aud) <= 0) {
+      const reset = new Date(al.resets + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "long" });
+      return json({ error: `You've used this month's AI writing allowance. It resets on ${reset}, or you can buy a top-up now. Your plans, records, worksheets and reports all still work.`, code: "fair_use" }, 429);
     }
   }
 

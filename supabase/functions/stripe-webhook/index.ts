@@ -60,6 +60,18 @@ Deno.serve(async (req) => {
           const sub = await stripe.subscriptions.retrieve(typeof s.subscription === "string" ? s.subscription : s.subscription.id);
           await save(sub, s.client_reference_id || s.metadata?.user_id);
         }
+        if (s.mode === "payment" && s.metadata?.kind === "topup" && s.payment_status === "paid") {
+          const uid = s.metadata.user_id || s.client_reference_id;
+          const credit = Number(s.metadata.credit_aud);
+          if (uid && credit > 0) {
+            const { error: e1 } = await admin.from("ai_credits").upsert({ id: s.id, parent_id: uid, pack: s.metadata.pack ?? null, amount_aud: credit, paid_cents: s.amount_total ?? null });
+            if (e1) console.error("Credit save failed", e1);
+            const a = s.customer_details?.address ?? {};
+            const { error: e2 } = await admin.from("payments").upsert({ id: s.id, user_id: uid, amount_cents: s.amount_total ?? 0, currency: s.currency ?? "aud", plan: "topup",
+              country: a.country ?? null, state: a.state ?? null, city: a.city ?? null, paid_at: new Date((s.created ?? Date.now() / 1000) * 1000).toISOString() });
+            if (e2) console.error("Top-up payment save failed", e2);
+          }
+        }
         break;
       }
       case "invoice.paid": {

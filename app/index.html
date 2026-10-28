@@ -545,7 +545,7 @@ async function childView(id){
       if (err.code === "upgrade") {
         $("gMsg").innerHTML = `<span style="color:var(--ink)">${esc(err.message)}</span> <span class="row" style="margin-top:8px"><a class="btn primary small" href="#/billing">See plans</a><button class="btn small" type="button" id="gTpl">Create a free template plan</button></span>`;
         $("gTpl").onclick = async () => { const p = await db.generateTemplate(c, week, $("gFocus").value.trim()); location.hash = `#/plan/${p.id}`; };
-      } else $("gMsg").textContent = err.message;
+      } else $("gMsg").innerHTML = aiErr(err);
     }
   };
 }
@@ -597,7 +597,7 @@ async function planView(id, dayIdx = 0){
     if (wsb) wsb.onclick = async () => { const l = ct.days[d].lessons[k], m = a.querySelector(".evmsg");
       wsb.disabled = true; if (m) m.innerHTML = `<span class="spinner"></span> Making a worksheet for this lesson. About a minute.`;
       try { const w = await db.writeWorksheet(c, { subject: (l.areas || [])[0] || (ct.areas || [])[0] || "General", topic: l.title, lesson: [l.goal && "Goal: " + l.goal, l.hook && "Hook: " + l.hook, l.steps?.length && "Steps: " + l.steps.join(" ")].filter(Boolean).join(". "), plan_id: id, lesson_key: key }); location.hash = `#/worksheet/${w.id}`; }
-      catch(err){ wsb.disabled = false; if (m) m.innerHTML = err.code === "upgrade" ? `${esc(err.message)} <a href="#/billing">See plans</a>` : esc(err.message); } };
+      catch(err){ wsb.disabled = false; if (m) m.innerHTML = aiErr(err); } };
     const fin = a.querySelector("[data-evfile]"), msg = a.querySelector(".evmsg");
     if (fin) fin.onchange = async () => { const file = fin.files[0]; fin.value = ""; if (!file) return;
       const go = async () => {
@@ -671,7 +671,7 @@ async function worksheetsView(childId){
   $("wf").onsubmit = async e => { e.preventDefault(); const topic = $("wTopic").value.trim(); if (!topic) { $("wMsg").textContent = "Type a topic, or tap one of the ideas."; return; }
     $("wGo").disabled = true; $("wWait").hidden = false; $("wMsg").textContent = "";
     try { const w = await db.writeWorksheet(c, { subject: $("wSubj").value, level: $("wLvl").value, topic, count: +$("wCount").value || null }); location.hash = `#/worksheet/${w.id}`; }
-    catch(err){ $("wGo").disabled = false; $("wWait").hidden = true; $("wMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+    catch(err){ $("wGo").disabled = false; $("wWait").hidden = true; $("wMsg").innerHTML = aiErr(err); } };
 }
 function wsItemHTML(it, n){
   const lines = k => `<div class="wlines">${"<span></span>".repeat(k)}</div>`;
@@ -799,7 +799,7 @@ async function reportView(childId, from, to){
     $("rSave").onclick = async () => { try { await db.saveReport(rep.id, rep.content); toast("Saved"); } catch(e){ toast(e.message); } }; }
   if ($("rWrite")) $("rWrite").onclick = async () => { $("rWrite").disabled = true; $("rWait").hidden = false; $("rMsg").textContent = "";
     try { await db.writeReport(c, from, to, R.facts); if (rep) await db.deleteReport(rep.id).catch(() => {}); reportView(childId, from, to); }
-    catch(err){ $("rWrite").disabled = false; $("rWait").hidden = true; $("rMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+    catch(err){ $("rWrite").disabled = false; $("rWait").hidden = true; $("rMsg").innerHTML = aiErr(err); } };
 }
 
 // Rough school terms: Term 1 Feb–Apr, Term 2 May–Jun, Term 3 Jul–Sep, Term 4 Oct–Dec (dates differ by state)
@@ -842,7 +842,7 @@ async function yearView(childId, year){
   }
   $("yf").onsubmit = async e => { e.preventDefault(); $("yGo").disabled = true; $("yWait").hidden = false; $("yMsg").textContent = "";
     try { await db.writeYear(c, year, $("yExtra").value.trim()); yearView(childId, year); window.scrollTo(0, 0); }
-    catch(err){ $("yGo").disabled = false; $("yWait").hidden = true; $("yMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+    catch(err){ $("yGo").disabled = false; $("yWait").hidden = true; $("yMsg").innerHTML = aiErr(err); } };
 }
 
 async function programFormView(childId){
@@ -868,7 +868,7 @@ async function programFormView(childId){
     $("pfGo").disabled = true; $("pfWait").hidden = false; $("pfMsg").textContent = "";
     try { const p = await db.writeProgram(c, answers); location.hash = `#/program/${p.id}`; }
     catch(err){ $("pfGo").disabled = false; $("pfWait").hidden = true;
-      $("pfMsg").innerHTML = err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>` : esc(err.message); } };
+      $("pfMsg").innerHTML = aiErr(err); } };
 }
 async function programView(id){
   const p = await db.program(id); const c = await db.child(p.child_id).catch(() => ({ name: "", state: p.state })); const ct = p.content || { sections: [] };
@@ -947,6 +947,13 @@ function editLesson(article, ct, d, k, planId, dayIdx){
     await db.savePlanContent(planId, ct); toast("Lesson saved"); planView(planId, dayIdx); };
 }
 
+const TOPUPS = [
+  { key: "small", name: "Small top-up", price: 4.99, blurb: "About 5 weekly plans or 30 worksheets" },
+  { key: "large", name: "Large top-up", price: 9.99, blurb: "About 11 weekly plans or 75 worksheets" }
+];
+// Error message for AI writing, with the right next step
+const aiErr = err => err.code === "upgrade" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">See plans</a>`
+  : err.code === "fair_use" ? `<span style="color:var(--ink)">${esc(err.message)}</span> <a class="btn primary small" href="#/billing">Buy a top-up</a>` : esc(err.message);
 const PLANS = [
   { key: "family", name: "Family", month: 24.99, year: 229, features: ["Unlimited personalised AI lesson plans", "Weekly plans tailored to each child's interests", "Year plans: 4 terms, each with a theme and goals", "Step-by-step guide to your state's requirements, with deadlines", "Registration pack: your written education program, drafted for you", "Progress reports for your moderator or review, with photos", "Learning time tracked by curriculum area", "Photo and video evidence on every lesson", "Up to 3 children"], soon: ["Download all evidence as one folder", "Share plans with your child's therapists"] }
 ];
@@ -962,6 +969,7 @@ async function billingView(){
       <h1>Account and billing</h1>
       ${status === "success" ? `<p class="banner">${acc.subscribed ? "Thank you! Your subscription is active." : "Thanks! Your payment went through. It can take a minute to show here; refresh shortly."}</p>` : ""}
       ${status === "cancelled" ? `<p class="banner">Checkout was cancelled. You haven't been charged.</p>` : ""}
+      ${status === "topup" ? `<p class="banner">Thank you! Your top-up has been added. If it doesn't show yet, refresh in a minute.</p>` : ""}
       ${acc.comp ? `<div class="card stack"><h2>You have free access</h2><p>Your account is on the free access list, so there's nothing to pay. You get unlimited personalised plans.</p></div>` :
         acc.subscribed && sub ? `<div class="card stack"><h2>${esc(PLANS.find(p => p.key === sub.plan)?.name || "Subscribed")}</h2><p>Status: <b>${esc(sub.status)}</b>${sub.current_period_end ? ` · renews ${nice(sub.current_period_end.slice(0,10))}` : ""}</p><div><button class="btn primary" type="button" id="portal">Manage subscription</button></div><p class="small muted">Change plan, update your card, download invoices or cancel.</p></div>` :
         `<div class="row"><div class="daytabs" role="tablist"><button type="button" data-p="year" aria-pressed="${period === "year"}">Yearly (save about 23%)</button><button type="button" data-p="month" aria-pressed="${period === "month"}">Monthly</button></div></div>
@@ -970,8 +978,13 @@ async function billingView(){
           <div><button class="btn primary" type="button" data-plan="${p.key}_${period}">Choose ${p.name}</button></div></div>`).join("")}</div>
         <p class="small muted">Prices in Australian dollars, including GST where applicable. Cancel any time. Payments are handled securely by Stripe.</p>`}
       <p id="bMsg" role="alert" style="color:var(--bad)"></p>
-      ${use && (acc.comp || acc.subscribed) && !acc.is_admin ? (() => { const pct = Math.min(100, Math.round(Number(use.spent_usd) * Number(use.aud_per_usd) / Number(use.budget_aud) * 100));
-        return `<div class="card stack"><div class="row" style="justify-content:space-between"><h3>AI writing this month</h3><span class="small muted">${pct}% of your fair-use allowance</span></div><div class="progress"><i style="width:${pct}%"></i></div><p class="small muted">Plans, worksheets, packs and reports all use a little of the allowance. Most families use well under half. It resets on ${nice(String(use.resets).slice(0,10))}.</p></div>`; })() : ""}
+      ${use && (acc.comp || acc.subscribed) && !acc.is_admin ? (() => { const pct = Math.min(100, Math.round(Number(use.month_aud) / Number(use.budget_aud) * 100)); const left = Number(use.credits_left_aud) || 0; const out = Number(use.available_aud) <= 0;
+        return `<div class="card stack" id="aiUse"><div class="row" style="justify-content:space-between"><h3>AI writing this month</h3><span class="small muted">${pct}% of this month's allowance</span></div><div class="progress"><i style="width:${pct}%"></i></div>
+          ${out ? `<p class="banner">You've used this month's AI writing. Buy a top-up to keep going, or wait until it resets on ${nice(String(use.resets).slice(0,10))}.</p>` : `<p class="small muted">Plans, worksheets, packs and reports each use a little. Most families use well under half. It resets on ${nice(String(use.resets).slice(0,10))}.</p>`}
+          ${left > 0 ? `<p class="small"><b>Top-up left:</b> ${Math.round(left / Number(use.budget_aud) * 100)}% of a month's allowance. It's used only after your monthly allowance runs out, and it doesn't expire.</p>` : ""}
+          <h3 style="margin-top:6px">Need more?</h3>
+          <div class="grid2">${TOPUPS.map(t => `<div class="card stack" style="padding:14px"><b>${t.name}: A$${t.price.toFixed(2)}</b><span class="small muted">${t.blurb}</span><div><button class="btn ${out ? "primary" : "quiet"} small" type="button" data-topup="${t.key}">Buy ${t.name.toLowerCase()}</button></div></div>`).join("")}</div>
+          <p class="small muted">One-off payment, not a subscription. Top-ups never expire while your account is open.</p></div>`; })() : ""}
       <div class="card stack" style="margin-top:24px"><h2>Delete my account</h2>
         <p>This permanently deletes your account, every child profile, all plans and records, and every photo and video. ${acc.subscribed ? "Your subscription will be cancelled straight away. " : ""}It can't be undone.</p>
         <p class="small muted">Payment records are kept for tax purposes, as our <a href="../privacy.html#keep" target="_blank" rel="noopener">Privacy Policy</a> explains. If you want to keep anything, print your plans first.</p>
@@ -996,6 +1009,7 @@ async function billingView(){
     bindDel();
     view.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { period = b.dataset.p; draw(); });
     view.querySelectorAll("[data-plan]").forEach(b => b.onclick = async () => { b.disabled = true; $("bMsg").textContent = ""; try { const r = await db.billing({ plan: b.dataset.plan }); location.href = r.url; } catch(e){ $("bMsg").textContent = e.message; b.disabled = false; } });
+    view.querySelectorAll("[data-topup]").forEach(b => b.onclick = async () => { b.disabled = true; $("bMsg").textContent = ""; try { const r = await db.billing({ action: "topup", pack: b.dataset.topup }); location.href = r.url; } catch(e){ $("bMsg").textContent = e.message; b.disabled = false; } });
     if ($("portal")) $("portal").onclick = async () => { try { const r = await db.billing({ action: "portal" }); location.href = r.url; } catch(e){ $("bMsg").textContent = e.message; } };
   };
   draw();
